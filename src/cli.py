@@ -7,17 +7,16 @@ each layer module above it stays ignorant of its neighbours (SPEC.md
 from __future__ import annotations
 
 import argparse
-import csv
-import json
 import logging
 import os
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
 import yaml
 
+from src.broker import client as broker_client
 from src.data import ccxt_provider
 from src.data.calendar import calendar_from_config
 from src.data.validate import BarValidationError, validate_bars
@@ -240,64 +239,74 @@ def replay(bar_close: str) -> int:
     return 0
 
 
-def reconcile(export_path: str) -> int:
-    """Compare a TradersPost order-history export against the decisions table.
+def reconcile(since_hours: int = 26) -> int:
+    """Compare the broker's own order history against the decisions table.
 
-    DEVIATION FROM SPEC.md, flagged rather than improvised silently:
-    TradersPost does not currently expose a public API for order/account
-    history - as of writing it is still roadmap/waitlist only. The spec's
-    reconcile command assumed a live pull; that cannot be built as written.
-    This is the practical substitute: point it at a CSV export from the
-    TradersPost dashboard's order history. The exact export column names,
-    and whether metadata.decision_id round-trips into it at all, are
-    UNVERIFIED without a real TradersPost account - confirm against a real
-    export before trusting this in place of the live API, and revisit once
-    TradersPost ships the waitlisted API.
+    AMENDED per review: TradersPost does not expose an order-history API
+    (still roadmap/waitlist as of writing, for every account), and
+    TradersPost's own guidance for this kind of check is to reconcile
+    against the broker directly. See SPEC.md "Reconciliation" and
+    "Secrets" for the full reasoning and the read-only-key requirement
+    this depends on.
 
-    Expected columns: an "id" or "decision_id" column, or a "metadata"
-    column containing the JSON blob we sent (which may itself have a
-    "decision_id" key) - configurable below.
+    Matching is heuristic, not exact: broker order objects do not carry
+    our decision_id (TradersPost places the order on our behalf, and
+    there is no confirmed way for our webhook metadata to survive that
+    hop). A sent decision counts as matched if the broker shows a closed
+    order for the same symbol and side, with quantity within 0.5%, in the
+    last `since_hours` hours. That is weaker than an exact id match, but
+    it is what a broker order object actually offers, and it still catches
+    the one failure this exists for: an order the broker filled with
+    nothing in our own log to show for it.
     """
+    universe_cfg, _ = load_config()
+    broker_cfg = universe_cfg.get("broker")
+    if not broker_cfg:
+        logger.error("no 'broker' section in config/universe.yaml - reconcile has nothing to compare against")
+        return 1
+
+    try:
+        client = broker_client.load_client_from_env(
+            broker_cfg["exchange"], broker_cfg["api_key_env"], broker_cfg["api_secret_env"]
+        )
+    except (broker_client.BrokerKeyNotReadOnly, RuntimeError) as exc:
+        logger.error("reconcile cannot start: %s", exc)
+        return 1
+
     conn = db.connect()
     sent = conn.execute(
-        "SELECT id, symbol FROM decisions WHERE stopped_at>=3 AND webhook_status BETWEEN 200 AND 299"
+        "SELECT id, symbol, action, quantity FROM decisions WHERE stopped_at>=3 AND webhook_status BETWEEN 200 AND 299"
     ).fetchall()
-    sent_ids = {r["id"] for r in sent}
 
-    matched_ids: set[str] = set()
-    unmatched_export_rows: list[dict] = []
+    since_ms = int((datetime.now(UTC) - timedelta(hours=since_hours)).timestamp() * 1000)
+    orders_by_symbol: dict[str, list[dict]] = {}
+    unmatched = []
 
-    with open(export_path, newline="") as f:
-        for row in csv.DictReader(f):
-            decision_id = row.get("decision_id") or row.get("id")
-            if not decision_id and row.get("metadata"):
-                try:
-                    decision_id = json.loads(row["metadata"]).get("decision_id")
-                except (json.JSONDecodeError, AttributeError):
-                    decision_id = None
-
-            if decision_id and decision_id in sent_ids:
-                matched_ids.add(decision_id)
-            else:
-                unmatched_export_rows.append(row)
-
-    unmatched_decisions = sent_ids - matched_ids
-
-    if unmatched_export_rows or unmatched_decisions:
-        logger.error(
-            "reconcile FAILED: %d export row(s) with no matching decision_id, "
-            "%d sent decision(s) with no matching export row",
-            len(unmatched_export_rows), len(unmatched_decisions),
+    for row in sent:
+        symbol = row["symbol"]
+        if symbol not in orders_by_symbol:
+            orders_by_symbol[symbol] = broker_client.fetch_closed_orders(client, symbol, since_ms)
+        side = "buy" if row["action"] == "buy" else "sell"
+        qty = row["quantity"] or 0
+        match = next(
+            (
+                o for o in orders_by_symbol[symbol]
+                if o.get("side") == side and qty and abs((o.get("filled") or 0) - qty) <= qty * 0.005
+            ),
+            None,
         )
-        for row in unmatched_export_rows:
-            logger.error("  unmatched order in export: %s", row)
-        for decision_id in unmatched_decisions:
-            writer.mark_reconciliation_failure(conn, decision_id, "no matching order found in TradersPost export")
-            logger.error("  unmatched decision, no order found in export: %s", decision_id)
+        if match is None:
+            unmatched.append(row)
+
+    if unmatched:
+        logger.error("reconcile FAILED: %d sent decision(s) with no matching broker order", len(unmatched))
+        for row in unmatched:
+            writer.mark_reconciliation_failure(conn, row["id"], "no matching order found in broker order history")
+            logger.error("  unmatched decision, no broker order found: %s (%s)", row["id"], row["symbol"])
         conn.close()
         return 1
 
-    logger.info("reconcile OK: %d order(s) matched against %d sent decision(s)", len(matched_ids), len(sent_ids))
+    logger.info("reconcile OK: %d sent decision(s) matched against broker order history", len(sent))
     conn.close()
     return 0
 
@@ -316,7 +325,7 @@ def main(argv: list[str] | None = None) -> int:
     p_replay.add_argument("bar_close")
 
     p_recon = sub.add_parser("reconcile")
-    p_recon.add_argument("export_path")
+    p_recon.add_argument("--since-hours", type=int, default=26)
 
     args = parser.parse_args(argv)
 
@@ -328,7 +337,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "replay":
         return replay(args.bar_close)
     if args.command == "reconcile":
-        return reconcile(args.export_path)
+        return reconcile(since_hours=args.since_hours)
     return 1
 
 

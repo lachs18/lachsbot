@@ -25,6 +25,19 @@ data_provider:
 # webhook URL. Never the URL itself - see .env.example.
 webhook_url_env: TRADERSPOST_WEBHOOK_URL_CRYPTO
 
+# Reconciliation only (cli.py reconcile) - TradersPost has no order-history
+# API, so this compares against the broker's own order history instead.
+# `exchange` here must match whichever venue TradersPost is actually
+# executing through for this universe - unconfirmed, since broker choice
+# is still open decision #1 in SPEC.md. Defaulting to the same exchange
+# already used for market data (coinbase) as the most coherent guess until
+# that's finalized. The key behind these env vars MUST be read-only.
+broker:
+  kind: ccxt
+  exchange: coinbase
+  api_key_env: BROKER_API_KEY_CRYPTO
+  api_secret_env: BROKER_API_SECRET_CRYPTO
+
 symbols:
   - symbol: BTC/USD
     tolerance_bps: 15     # entry limit price tolerance band, basis points around ref_price

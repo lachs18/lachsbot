@@ -205,7 +205,11 @@ Use `cancelAfter` so an unfilled entry does not sit on the book into the next ba
 
 ### Reconciliation
 
-Once a day, compare TradersPost order history against the `decisions` table. Any order without a matching `decision_id` in metadata is a critical alert. This is the check that enforces the one rule from the scope section, and it needs to exist before going live, not after.
+**Amended after milestone 1 review.** The original wording below assumed TradersPost exposes an order-history API. It does not: as of writing, TradersPost's own documentation states account and order data access is still roadmap/waitlist only, for every user, regardless of account status. TradersPost's own guidance for this kind of check is to reconcile against the broker's API directly instead.
+
+Once a day, compare the **configured broker's** order history (via CCXT, using a read-only API key - see Secrets) against the `decisions` table. Broker orders do not carry our `decision_id`: TradersPost places the order at the broker on our behalf, and there is no confirmed mechanism for our webhook's `metadata` to survive that hop (unverified - no live broker account exists yet to check). So matching is heuristic rather than exact: a sent decision counts as matched if the broker shows a closed order for the same symbol, same side, and a quantity within 0.5%, filled within a configurable window of when the webhook was sent. Any sent decision with no such match is a critical alert. This is weaker than an exact `decision_id` match would be, but it is what a broker order object actually offers, and it still catches the one failure this check exists for: an order that reached the market with no corresponding row in our own log.
+
+This is the check that enforces the one rule from the scope section, and it needs to exist before going live, not after.
 
 ## Repository and dependencies
 
@@ -221,6 +225,7 @@ kronos-1h/
     signal/              # model wrapper, returns direction + confidence
     risk/                # skfolio wrapper, returns quantities or refusals
     execution/           # webhook builder and poster
+    broker/              # read-only broker API client, used only by reconcile (see Secrets)
     log/                 # SQLite writer, the only module allowed to write
     server/              # read-only JSON API for the terminal
     cli.py               # run-once, run-scheduled, replay, reconcile
@@ -289,7 +294,7 @@ Claude Code checks itself against these. All must pass before milestone 2 starts
 4. Killing the process mid-run leaves a row with `stopped_at` matching the last completed stage, and no orphan order at the broker
 5. The terminal renders a real run with no mock data remaining in the file, and its funnel counts match a direct SQL count
 6. `latency_ms` and `stage_ms` are populated on every row, including halted ones
-7. `cli.py reconcile` compares TradersPost order history to the decisions table and exits non-zero on any unmatched order
+7. `cli.py reconcile` compares the **broker's** order history (not TradersPost's - see "Reconciliation" below for why) to the decisions table and exits non-zero on any unmatched order
 8. A forced 60-second delay produces a rejected webhook, an error-level log line, and a red row in the terminal
 
 ### Done means
@@ -355,8 +360,10 @@ The `HALT` file is deliberately crude. It works when the process is wedged, when
 ### Secrets
 
 - `.env` is gitignored, `.env.example` is committed with empty values
-- The repo holds the TradersPost webhook URL and nothing else. It never holds a broker key, and there is no code path that could use one
-- Nothing is logged that contains the webhook URL, including on error
+- The repo holds the TradersPost webhook URL and nothing else for the *trading* path. There is no code path in `src/execution/` or `src/signal/` or `src/risk/` that could use a broker key
+- Nothing is logged that contains the webhook URL or the broker key, including on error
+
+**Deliberate exception: a read-only broker API key, for reconciliation only.** `src/broker/client.py` holds a broker API key (`BROKER_API_KEY_CRYPTO` / `BROKER_API_SECRET_CRYPTO` in `.env`) so `cli.py reconcile` can pull the broker's own order history - see "Reconciliation" above for why this exists instead of a TradersPost API call. This is a narrower version of the same rule, not a break from it: the key must be scoped read-only (view-only, no trade, no transfer) before it is used, and `check_read_only()` calls the broker's own permission-check endpoint and refuses to run reconciliation otherwise, raising `BrokerKeyNotReadOnly`. `src/broker/client.py` is the only module allowed to hold or use this key, and it never calls an order-placement or order-cancellation method - only `fetch_closed_orders` and the permission check. A key with trade or transfer scope is treated as a configuration error, not something reconcile works around.
 
 ### Never in the repo
 
