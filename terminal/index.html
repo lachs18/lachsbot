@@ -336,9 +336,9 @@ svg.viz{display:block; width:100%; height:auto; overflow:visible}
       <span class="mode">paper</span>
     </div>
     <div class="links">
-      <span class="link"><i class="dot"></i>Kronos</span>
-      <span class="link"><i class="dot"></i>TradersPost</span>
-      <span class="link"><i class="dot warn"></i>IBKR</span>
+      <span class="link"><i class="dot"></i>Signal: SMA 10/30 (milestone 1)</span>
+      <span class="link"><i class="dot"></i>Data: Coinbase via CCXT</span>
+      <span class="link"><i class="dot warn"></i>TradersPost: broker TBD</span>
     </div>
     <span class="clock mono" id="clock">--:--:--</span>
     <button class="ctl" id="feed" aria-pressed="true">Pause feed</button>
@@ -348,10 +348,10 @@ svg.viz{display:block; width:100%; height:auto; overflow:visible}
 
 <div class="wrap">
 
-  <p class="notice">Sample data. <span>Nothing is connected yet. Every number below is generated in the browser.</span></p>
+  <p class="notice" id="notice">Connecting to the local API. <span id="notice-detail">Loading /api/decisions...</span></p>
 
   <section class="hero">
-    <h1 id="hero-label">Today, 09:00 to 16:00 Zurich</h1>
+    <h1 id="hero-label">Today, UTC</h1>
     <div class="funnel">
       <div class="stages" id="stages"></div>
       <div class="track" id="track"></div>
@@ -381,7 +381,7 @@ svg.viz{display:block; width:100%; height:auto; overflow:visible}
     <div class="rail">
       <section class="panel" id="detail"></section>
       <section class="panel">
-        <div class="panel-head"><h2>Exposure</h2><span class="count">cap 60%</span></div>
+        <div class="panel-head"><h2>Exposure</h2><span class="count" id="exp-cap-label">cap —</span></div>
         <div class="ring">
           <svg viewBox="0 0 84 84" id="expring" role="img" aria-label="Gross exposure against cap"></svg>
           <div>
@@ -412,7 +412,7 @@ svg.viz{display:block; width:100%; height:auto; overflow:visible}
         <div class="chips" id="ov-chips"></div>
         <svg class="viz" id="overlay" viewBox="0 0 340 150" role="img" aria-label="Predicted path against what actually happened"></svg>
         <div class="legend-row">
-          <span><u class="dash"></u>Kronos path</span>
+          <span><u class="dash"></u>forecast path</span>
           <span><u style="background:var(--ink)"></u>what happened</span>
           <span><u style="background:var(--accent);opacity:.35"></u>confidence cone</span>
         </div>
@@ -437,146 +437,176 @@ svg.viz{display:block; width:100%; height:auto; overflow:visible}
     </div>
   </section>
 
-  <p class="foot">This terminal records what the system decided and why. Orders, fills and account balances live in TradersPost. Nothing here places a trade.</p>
+  <p class="foot">This terminal records what the system decided and why. Orders, fills and account balances live in TradersPost. Nothing here places a trade - every route above is a GET against the local read-only API.</p>
 </div>
 
 <script>
 (function(){
 "use strict";
 
-/* ---------------- mock decisions ---------------- */
-var SEED = [
-  {t:"09:00:03", tick:"SPY", verb:"buy", lat:"312ms", end:"fill",
-   sig:{h:0.62, dir:"+0.81%", hz:"4h", ctx:512},
-   size:{w:"12.0%", qty:14, px:"612.40", cap:"7.2% of equity"},
-   hook:{ok:true, code:200, body:{ticker:"SPY", action:"buy", orderType:"market", quantity:14}},
-   fill:{qty:14, px:"612.44", slip:"+0.04", venue:"IBKR paper"}},
+/* ---------------- state ---------------- */
+var rows = [];
+var selectedId = null;
+var sel = -1;
+var filter = "all";
+var live = true;
+var funnelData = null;
+var positionsData = { positions: [], equity_usd: 0, gross_exposure: 0, max_gross_exposure: 0.6 };
+var scorecard = [];
+var ovSel = 0;
+var detailCache = {};
 
-  {t:"09:00:04", tick:"QQQ", verb:"skip", lat:"88ms", end:"halt", at:1,
-   sig:{h:0.41, dir:"+0.22%", hz:"4h", ctx:512},
-   why:"Forecast confidence 0.41 is below the 0.55 floor. No size requested."},
-
-  {t:"09:00:06", tick:"NVDA", verb:"buy", lat:"401ms", end:"fill",
-   sig:{h:0.71, dir:"+1.90%", hz:"4h", ctx:512},
-   size:{w:"9.5%", qty:6, px:"1,042.10", cap:"5.7% of equity"},
-   hook:{ok:true, code:200, body:{ticker:"NVDA", action:"buy", orderType:"limit", quantity:6, limitPrice:1042.50}},
-   fill:{qty:6, px:"1,042.38", slip:"-0.12", venue:"IBKR paper"}},
-
-  {t:"10:00:02", tick:"IWM", verb:"buy", lat:"9.9s", end:"fill",
-   sig:{h:0.58, dir:"+0.64%", hz:"4h", ctx:512},
-   size:{w:"6.0%", qty:21, px:"238.15", cap:"3.5% of equity"},
-   hook:{ok:true, code:200, body:{ticker:"IWM", action:"buy", orderType:"limit", quantity:21, limitPrice:238.40, rejectAfter:30}},
-   warn:"Model inference took 8.4s of this. Comfortable against a 30s deadline, thin if you ever move to 15m bars. The limit price, not the clock, is what protected the entry here.",
-   fill:{qty:21, px:"238.31", slip:"-0.16", venue:"IBKR paper"}},
-
-  {t:"10:00:05", tick:"TLT", verb:"skip", lat:"96ms", end:"halt", at:2,
-   sig:{h:0.66, dir:"+0.39%", hz:"4h", ctx:512},
-   size:{w:"1.4%", qty:0, px:"—", cap:"—"},
-   why:"skfolio weight 1.4% is under the 2.0% minimum ticket. Position would be too small to cover costs."},
-
-  {t:"11:00:03", tick:"BTC/USD", verb:"sell", lat:"288ms", end:"fill",
-   sig:{h:0.69, dir:"-1.35%", hz:"4h", ctx:512},
-   size:{w:"8.0%", qty:0.042, px:"71,880", cap:"4.8% of equity"},
-   hook:{ok:true, code:200, body:{ticker:"BTC/USD", action:"sell", orderType:"market", quantity:0.042}},
-   fill:{qty:0.042, px:"71,844", slip:"-36.0", venue:"Coinbase paper"}},
-
-  {t:"12:00:01", tick:"GLD", verb:"skip", lat:"74ms", end:"halt", at:2,
-   sig:{h:0.60, dir:"+0.51%", hz:"4h", ctx:512},
-   size:{w:"0.0%", qty:0, px:"—", cap:"—"},
-   why:"Gross exposure already at the 60% cap. skfolio returned zero weight for every new candidate."},
-
-  {t:"13:00:04", tick:"SPY", verb:"exit", lat:"274ms", end:"fill",
-   sig:{h:0.64, dir:"-0.44%", hz:"4h", ctx:512},
-   size:{w:"0.0%", qty:14, px:"614.02", cap:"closing"},
-   hook:{ok:true, code:200, body:{ticker:"SPY", action:"exit", orderType:"market"}},
-   fill:{qty:14, px:"613.98", slip:"-0.04", venue:"IBKR paper"}},
-
-  {t:"14:00:02", tick:"ETH/USD", verb:"buy", lat:"330ms", end:"fill",
-   sig:{h:0.57, dir:"+1.12%", hz:"4h", ctx:512},
-   size:{w:"5.5%", qty:0.61, px:"2,455", cap:"3.3% of equity"},
-   hook:{ok:true, code:200, body:{ticker:"ETH/USD", action:"buy", orderType:"market", quantity:0.61}},
-   fill:{qty:0.61, px:"2,458", slip:"+3.0", venue:"Coinbase paper"}},
-
-  {t:"14:30:47", tick:"XLE", verb:"buy", lat:"47.3s", end:"bad", at:3,
-   sig:{h:0.63, dir:"+0.77%", hz:"4h", ctx:512},
-   size:{w:"7.2%", qty:33, px:"92.40", cap:"4.1% of equity"},
-   hook:{ok:false, code:400, body:{ticker:"XLE", action:"buy", orderType:"limit", quantity:33, limitPrice:92.55, rejectAfter:30}},
-   why:"Rejected at 47.3s, past the 30s deadline. The data feed dropped at 14:29:11 and reconnected at 14:29:58, so the bar was only processed after the queue drained. This is the exact failure rejectAfter exists to catch. Treat it as an alert, not a missed trade."},
-
-  {t:"15:00:03", tick:"QQQ", verb:"skip", lat:"91ms", end:"halt", at:1,
-   sig:{h:0.49, dir:"-0.18%", hz:"4h", ctx:512},
-   why:"Forecast confidence 0.49 is below the 0.55 floor. No size requested."}
-];
-
-var POOL = ["SPY","QQQ","NVDA","IWM","TLT","GLD","BTC/USD","ETH/USD","MSFT","XLE"];
 var STEPS = [
-  {k:"sig",  n:"1", h:"Kronos forecast"},
-  {k:"size", n:"2", h:"skfolio sizing"},
+  {k:"sig",  n:"1", h:"Signal (SMA 10/30 - Kronos arrives at milestone 2)"},
+  {k:"size", n:"2", h:"Risk sizing (fixed fractional - skfolio arrives at milestone 4)"},
   {k:"hook", n:"3", h:"Webhook to TradersPost"},
   {k:"fill", n:"4", h:"Broker fill"}
 ];
 
-var rows = SEED.slice().reverse();
-var sel = 0, filter = "all", live = true;
-
 /* ---------------- helpers ---------------- */
 function el(t, c, x){ var e=document.createElement(t); if(c) e.className=c; if(x!=null) e.textContent=x; return e; }
-function reached(r){ return r.end==="fill" ? 4 : (r.end==="bad" ? 3 : (r.at||1)); }
+function reached(r){ return r.at || 1; }
 function passed(r){ return r.end==="fill" || r.end==="bad"; }
-
-/* ---------------- visuals ---------------- */
-function rngFrom(key){
-  var s = 7; for(var i=0;i<key.length;i++){ s = (s*31 + key.charCodeAt(i)) % 2147483647; }
-  return function(){ s = (s*1103515245 + 12345) % 2147483648; return s/2147483648; };
+function fmtLatency(ms){ return ms == null ? "—" : (ms < 1000 ? ms + "ms" : (ms/1000).toFixed(1) + "s"); }
+function fmtTime(iso){
+  try { return new Date(iso).toLocaleTimeString("en-GB", {hour12:false}); }
+  catch(e){ return iso || "—"; }
 }
 
-function seriesFor(r){
-  var rnd = rngFrom(r.tick + r.t);
-  var hist = [], v = 100;
-  for(var i=0;i<46;i++){ v += (rnd()-0.5)*2.1; hist.push(v); }
-  var pct = parseFloat(r.sig.dir) / 100;
-  var drift = (v * pct) / 14;
-  var pred = [], p = v;
-  for(var j=0;j<14;j++){ p += drift + (rnd()-0.5)*0.55; pred.push(p); }
-  return {hist:hist, pred:pred, last:v};
+async function getJSON(url){
+  var resp = await fetch(url);
+  if(!resp.ok) throw new Error(url + " -> HTTP " + resp.status);
+  return resp.json();
 }
 
-function forecastChart(r){
-  var s = seriesFor(r), W = 300, H = 92, SPLIT = 196;
-  var all = s.hist.concat(s.pred);
-  var spread = (1 - r.sig.h) * 3.2;
-  var lo = Math.min.apply(null, all) - spread*2.4, hi = Math.max.apply(null, all) + spread*2.4;
+/* ---------------- mapping DB rows onto the shape the UI renders ---------------- */
+function mapDecision(d){
+  var end = d.outcome === "filled" ? "fill" : (d.outcome === "failed" ? "bad" : "halt");
+  var mapped = {
+    id: d.id, t: fmtTime(d.bar_close), tick: d.symbol, verb: d.action || "skip",
+    lat: fmtLatency(d.latency_ms), latencyMs: d.latency_ms,
+    end: end, at: d.stopped_at, why: d.reason || "", raw: d
+  };
+  if(d.direction != null){
+    mapped.sig = {
+      h: d.confidence,
+      dir: (d.predicted_pct >= 0 ? "+" : "") + Number(d.predicted_pct).toFixed(2) + "%",
+      hz: d.horizon_bars + "h", ctx: d.context_bars
+    };
+  }
+  if(d.target_weight != null){
+    mapped.size = {
+      w: (d.target_weight*100).toFixed(1) + "%",
+      qty: d.quantity,
+      px: d.ref_price != null ? Number(d.ref_price).toFixed(2) : "—",
+      cap: "—"
+    };
+  }
+  if(d.webhook_status != null || d.webhook_body){
+    var body = {};
+    try { body = d.webhook_body ? JSON.parse(d.webhook_body) : {}; } catch(e){ body = {}; }
+    mapped.hook = { ok: d.webhook_status >= 200 && d.webhook_status < 300, code: d.webhook_status, body: body };
+  }
+  if(d.fill_qty != null){
+    mapped.fill = {
+      qty: d.fill_qty,
+      px: d.fill_price != null ? Number(d.fill_price).toFixed(2) : "—",
+      venue: d.venue || "—"
+    };
+  }
+  return mapped;
+}
+
+/* ---------------- data loading ---------------- */
+async function loadDecisions(){
+  var data = await getJSON("/api/decisions?limit=200");
+  rows = data.map(mapDecision);
+  if(selectedId){
+    var idx = rows.findIndex(function(r){ return r.id === selectedId; });
+    sel = idx >= 0 ? idx : (rows.length ? 0 : -1);
+  } else {
+    sel = rows.length ? 0 : -1;
+  }
+  selectedId = sel >= 0 ? rows[sel].id : null;
+}
+
+async function loadFunnel(){
+  funnelData = await getJSON("/api/funnel?date=today");
+}
+
+async function loadPositions(){
+  positionsData = await getJSON("/api/positions");
+}
+
+async function loadScorecard(){
+  scorecard = await getJSON("/api/scorecard");
+  if(ovSel >= scorecard.length) ovSel = 0;
+}
+
+/* ---------------- notice ---------------- */
+function updateNotice(){
+  var notice = document.getElementById("notice");
+  var detail = document.getElementById("notice-detail");
+  if(rows.length === 0){
+    notice.style.display = "";
+    detail.textContent = "No decisions logged yet. Run \"python -m src.cli run-once\" (or run-scheduled) to populate this terminal from the local API.";
+  } else {
+    notice.style.display = "none";
+  }
+}
+
+/* ---------------- forecast chart (real stored path, milestone 2's own acceptance
+   criterion - "draws from stored paths rather than anything generated
+   client-side" - is true from milestone 1 onward for this reason) ---------------- */
+function forecastChart(sig, forecast){
+  var W = 300, H = 92, SPLIT = 196;
+  if(!forecast){
+    var empty = el("div","chart");
+    empty.appendChild(el("div", null, "Forecast path unavailable for this decision."));
+    return empty;
+  }
+  var context = JSON.parse(forecast.context);
+  var path = JSON.parse(forecast.path);
+  var band = JSON.parse(forecast.band);
+
+  var all = context.concat(path);
+  var bandVals = [];
+  band.forEach(function(b){ bandVals.push(b[0], b[1]); });
+  var lo = Math.min.apply(null, all.concat(bandVals));
+  var hi = Math.max.apply(null, all.concat(bandVals));
+  var pad = (hi - lo) * 0.12 || 1;
+  lo -= pad; hi += pad;
   var y = function(v){ return H - 6 - ((v - lo) / (hi - lo)) * (H - 12); };
-  var xh = function(i){ return (i / (s.hist.length - 1)) * SPLIT; };
-  var xp = function(i){ return SPLIT + ((i + 1) / s.pred.length) * (W - SPLIT); };
+  var xh = function(i){ return (i / Math.max(1, context.length - 1)) * SPLIT; };
+  var xp = function(i){ return SPLIT + ((i + 1) / path.length) * (W - SPLIT); };
 
-  var hp = s.hist.map(function(v,i){ return (i?"L":"M") + xh(i).toFixed(1) + " " + y(v).toFixed(1); }).join(" ");
-  var pp = "M " + SPLIT + " " + y(s.last).toFixed(1) + " " +
-    s.pred.map(function(v,i){ return "L " + xp(i).toFixed(1) + " " + y(v).toFixed(1); }).join(" ");
+  var hp = context.map(function(v,i){ return (i?"L":"M") + xh(i).toFixed(1) + " " + y(v).toFixed(1); }).join(" ");
+  var lastContext = context[context.length-1];
+  var pp = "M " + SPLIT + " " + y(lastContext).toFixed(1) + " " +
+    path.map(function(v,i){ return "L " + xp(i).toFixed(1) + " " + y(v).toFixed(1); }).join(" ");
 
   var up = [], dn = [];
-  for(var i=0;i<s.pred.length;i++){
-    var w = spread * Math.sqrt((i+1)/s.pred.length) * 2.6;
-    up.push(xp(i).toFixed(1) + " " + y(s.pred[i] + w).toFixed(1));
-    dn.unshift(xp(i).toFixed(1) + " " + y(s.pred[i] - w).toFixed(1));
-  }
-  var fan = "M " + SPLIT + " " + y(s.last).toFixed(1) + " L " + up.join(" L ") + " L " + dn.join(" L ") + " Z";
-  var good = r.sig.dir.charAt(0) === "+";
+  band.forEach(function(b, i){
+    up.push(xp(i).toFixed(1) + " " + y(b[1]).toFixed(1));
+    dn.unshift(xp(i).toFixed(1) + " " + y(b[0]).toFixed(1));
+  });
+  var fan = "M " + SPLIT + " " + y(lastContext).toFixed(1) + " L " + up.join(" L ") + " L " + dn.join(" L ") + " Z";
+  var good = path[path.length-1] >= lastContext;
 
   var svg =
-    '<svg class="viz" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Kronos forecast for ' + r.tick + '">' +
+    '<svg class="viz" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Forecast path">' +
     '<path d="' + fan + '" fill="var(--accent)" opacity=".16"></path>' +
     '<line x1="' + SPLIT + '" y1="2" x2="' + SPLIT + '" y2="' + (H-2) + '" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 3"></line>' +
     '<path d="' + hp + '" fill="none" stroke="var(--ink-2)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"></path>' +
     '<path d="' + pp + '" fill="none" stroke="' + (good ? "var(--up)" : "var(--down)") + '" stroke-width="1.8" stroke-dasharray="3.5 2.5" stroke-linecap="round"></path>' +
-    '<circle cx="' + SPLIT + '" cy="' + y(s.last).toFixed(1) + '" r="2.6" fill="var(--ink)"></circle>' +
+    '<circle cx="' + SPLIT + '" cy="' + y(lastContext).toFixed(1) + '" r="2.6" fill="var(--ink)"></circle>' +
     '</svg>';
 
   var box = el("div","chart");
   box.innerHTML = svg;
   var cap = el("div","chart-cap");
-  cap.appendChild(el("span", null, "46 bars of context"));
-  cap.appendChild(el("span", null, r.sig.hz + " ahead  " + r.sig.dir));
+  cap.appendChild(el("span", null, context.length + " bars of context"));
+  cap.appendChild(el("span", null, (sig.hz||"") + " ahead  " + (sig.dir||"")));
   box.appendChild(cap);
   return box;
 }
@@ -600,16 +630,17 @@ function confBar(h){
   return box;
 }
 
-function parseLat(s){
-  return s.indexOf("ms") > -1 ? parseFloat(s) : parseFloat(s) * 1000;
-}
-
+/* ---------------- execution timing (real per-stage measurements from stage_ms,
+   not the guessed proportions the mock used) ---------------- */
 function budgetBar(r){
-  var DEADLINE = 30000, total = parseLat(r.lat);
+  var DEADLINE = 30000;
+  var sm = { data:0, inference:0, risk:0, network:0 };
+  try { if(r.raw.stage_ms) sm = JSON.parse(r.raw.stage_ms); } catch(e){}
   var parts = [
-    ["model inference", total*0.74, "var(--accent)"],
-    ["sizing",          total*0.07, "var(--ink-2)"],
-    ["network",         total*0.19, "var(--hold)"]
+    ["data fetch", sm.data, "var(--ink-2)"],
+    ["model inference", sm.inference, "var(--accent)"],
+    ["risk sizing", sm.risk, "var(--ink-2)"],
+    ["network", sm.network, "var(--hold)"]
   ];
   var box = el("div","budget");
   var track = el("div","budget-track");
@@ -629,9 +660,10 @@ function budgetBar(r){
   parts.forEach(function(p){
     var s = el("span");
     var u = el("u"); u.style.background = p[2]; s.appendChild(u);
-    s.appendChild(document.createTextNode(p[0] + " " + Math.round(p[1]) + "ms"));
+    s.appendChild(document.createTextNode(p[0] + " " + Math.round(p[1]||0) + "ms"));
     lg.appendChild(s);
   });
+  var total = r.latencyMs || 0;
   var head = total > DEADLINE*0.9;
   var tail = el("span", null, head
     ? "past the 30s rejectAfter deadline"
@@ -646,6 +678,7 @@ function budgetBar(r){
 function drawDayStrip(){
   var svg = document.getElementById("daystrip");
   var W = 640, H = 40, mid = (H-10)/2;
+  if(!rows.length){ svg.innerHTML = ""; document.getElementById("strip-note").textContent = "0 decisions"; return; }
   var hrs = rows.map(function(r){ var p = r.t.split(":"); return +p[0] + (+p[1])/60; });
   var H0 = Math.floor(Math.min.apply(null, hrs.concat([9])));
   var H1 = Math.ceil(Math.max.apply(null, hrs.concat([16.5])));
@@ -667,220 +700,39 @@ function drawDayStrip(){
   document.getElementById("strip-note").textContent = rows.length + " decisions";
 }
 
-/* ---------------- exposure ---------------- */
-var WEIGHTS = [
-  {s:"NVDA", w:9.5}, {s:"ETH/USD", w:5.5}, {s:"BTC/USD", w:8.0},
-  {s:"XLE", w:12.4}, {s:"MSFT", w:7.8}
-];
-function drawExposure(){
-  var gross = WEIGHTS.reduce(function(a,b){ return a + b.w; }, 0);
-  var CAP = 60, frac = Math.min(1, gross/CAP);
-  var R = 33, C = 2*Math.PI*R;
-  document.getElementById("expring").innerHTML =
-    '<circle cx="42" cy="42" r="'+R+'" fill="none" stroke="var(--line-soft)" stroke-width="9"></circle>' +
-    '<circle cx="42" cy="42" r="'+R+'" fill="none" stroke="var(--accent)" stroke-width="9" stroke-linecap="round" ' +
-    'stroke-dasharray="'+(C*frac).toFixed(1)+' '+C.toFixed(1)+'" transform="rotate(-90 42 42)"></circle>';
-  document.getElementById("exp-n").textContent = gross.toFixed(1) + "%";
-  document.getElementById("exp-r").textContent = (CAP-gross).toFixed(1) + " points";
-
-  var host = document.getElementById("wbars"); host.innerHTML = "";
-  WEIGHTS.slice().sort(function(a,b){ return b.w-a.w; }).forEach(function(x){
-    var row = el("div","wbar");
-    row.appendChild(el("span","wbar-s", x.s));
-    var t = el("div","wbar-t"), f = el("div","wbar-f");
-    f.style.width = (x.w/20*100).toFixed(1) + "%";
-    t.appendChild(f); row.appendChild(t);
-    row.appendChild(el("span","wbar-v", x.w.toFixed(1) + "%"));
-    host.appendChild(row);
-  });
-}
-
-/* ---------------- scorecard data ---------------- */
-var CLOSED = (function(){
-  var rnd = rngFrom("closed-set-v1");
-  var syms = ["SPY","QQQ","NVDA","IWM","TLT","GLD","BTC/USD","ETH/USD","MSFT","XLE"];
-  var out = [];
-  for(var i=0;i<24;i++){
-    var conf = 0.55 + rnd()*0.33;
-    var pred = (rnd()-0.40) * 2.3;
-    var real = pred*0.26 + (rnd()-0.5)*3.1;
-    out.push({
-      s: syms[i % syms.length],
-      id: "c" + i,
-      day: "Sep " + (2 + Math.floor(i*0.6)),
-      conf: conf, pred: pred, real: real
-    });
-  }
-  return out;
-})();
-var ovSel = 0;
-
-function pathsFor(c){
-  var rnd = rngFrom(c.s + c.id), N = 14, pred = [], real = [];
-  for(var i=0;i<N;i++){
-    var f = (i+1)/N;
-    pred.push(c.pred * f);
-    real.push(c.real * f + (rnd()-0.5) * 0.85 * Math.sqrt(f));
-  }
-  return {pred:pred, real:real, n:N};
-}
-
-function drawOverlay(){
-  var c = CLOSED[ovSel], p = pathsFor(c);
-  var W = 340, H = 150, L = 34, R = 8, T = 10, B = 22;
-  var spread = (1 - c.conf) * 2.6;
-  var vals = p.pred.concat(p.real).concat([c.pred + spread*2.4, c.pred - spread*2.4, 0]);
-  var lo = Math.min.apply(null, vals) * 1.15, hi = Math.max.apply(null, vals) * 1.15;
-  if(hi - lo < 1){ hi += 0.5; lo -= 0.5; }
-  var X = function(i){ return L + ((i+1)/p.n) * (W-L-R); };
-  var Y = function(v){ return T + (1 - (v-lo)/(hi-lo)) * (H-T-B); };
-
-  var up = [], dn = [];
-  for(var i=0;i<p.n;i++){
-    var w = spread * Math.sqrt((i+1)/p.n) * 2.4;
-    up.push(X(i).toFixed(1)+" "+Y(p.pred[i]+w).toFixed(1));
-    dn.unshift(X(i).toFixed(1)+" "+Y(p.pred[i]-w).toFixed(1));
-  }
-  var o = "";
-  o += '<path d="M '+L+' '+Y(0).toFixed(1)+' L '+up.join(" L ")+' L '+dn.join(" L ")+' Z" fill="var(--accent)" opacity=".16"></path>';
-  o += '<line x1="'+L+'" y1="'+Y(0).toFixed(1)+'" x2="'+(W-R)+'" y2="'+Y(0).toFixed(1)+'" stroke="var(--line)" stroke-width="1"></line>';
-  [hi, 0, lo].forEach(function(v){
-    o += '<text x="'+(L-6)+'" y="'+(Y(v)+3).toFixed(1)+'" font-size="8.5" text-anchor="end" fill="var(--muted)" font-family="IBM Plex Mono, monospace">'+(v>0?"+":"")+v.toFixed(1)+'%</text>';
-  });
-  function line(arr, stroke, dash, w){
-    var d = "M "+L+" "+Y(0).toFixed(1)+" " + arr.map(function(v,i){ return "L "+X(i).toFixed(1)+" "+Y(v).toFixed(1); }).join(" ");
-    return '<path d="'+d+'" fill="none" stroke="'+stroke+'" stroke-width="'+w+'" stroke-linecap="round" stroke-linejoin="round"'+(dash?' stroke-dasharray="4 3"':'')+'></path>';
-  }
-  o += line(p.pred, "var(--accent)", true, 1.8);
-  o += line(p.real, "var(--ink)", false, 2);
-  o += '<circle cx="'+X(p.n-1).toFixed(1)+'" cy="'+Y(p.real[p.n-1]).toFixed(1)+'" r="3" fill="var(--ink)"></circle>';
-  o += '<text x="'+L+'" y="'+(H-6)+'" font-size="8.5" fill="var(--muted)" font-family="IBM Plex Mono, monospace">entry</text>';
-  o += '<text x="'+(W-R)+'" y="'+(H-6)+'" font-size="8.5" text-anchor="end" fill="var(--muted)" font-family="IBM Plex Mono, monospace">+14 bars</text>';
-  document.getElementById("overlay").innerHTML = o;
-
-  var chips = document.getElementById("ov-chips"); chips.innerHTML = "";
-  CLOSED.slice(0, 10).forEach(function(x, i){
-    var b = el("button","tchip");
-    b.setAttribute("aria-pressed", i===ovSel ? "true" : "false");
-    var u = el("u"); u.style.background = (x.pred>0) === (x.real>0) ? "var(--up)" : "var(--down)";
-    b.appendChild(u); b.appendChild(document.createTextNode(x.s));
-    b.onclick = function(){ ovSel = i; drawOverlay(); };
-    chips.appendChild(b);
-  });
-
-  var hit = (c.pred>0) === (c.real>0);
-  var inside = Math.abs(c.real - c.pred) <= spread*2.4;
-  var st = document.getElementById("ov-stats"); st.innerHTML = "";
-  [
-    ["Kronos said", (c.pred>0?"+":"")+c.pred.toFixed(2)+"%", ""],
-    ["Actually did", (c.real>0?"+":"")+c.real.toFixed(2)+"%", c.real>0?"pos":"neg"],
-    ["Direction", hit ? "right" : "wrong", hit?"pos":"neg"],
-    ["Inside the cone", inside ? "yes" : "no", inside?"pos":"neg"]
-  ].forEach(function(s){
-    var w = el("div","stat " + s[2]);
-    w.appendChild(el("b", null, s[1]));
-    w.appendChild(el("span", null, s[0]));
-    st.appendChild(w);
-  });
-  document.getElementById("ov-count").textContent = c.s + " · " + c.day;
-}
-
-function drawScatter(){
-  var W = 340, H = 186, L = 36, R = 10, T = 12, B = 26;
-  var xlo = 0.50, xhi = 0.92;
-  var ylo = -5, yhi = 5;
-  var X = function(v){ return L + ((v-xlo)/(xhi-xlo))*(W-L-R); };
-  var Y = function(v){ return T + (1-(v-ylo)/(yhi-ylo))*(H-T-B); };
-  var o = "";
-
-  [-4,-2,0,2,4].forEach(function(v){
-    o += '<line x1="'+L+'" y1="'+Y(v).toFixed(1)+'" x2="'+(W-R)+'" y2="'+Y(v).toFixed(1)+'" stroke="'+(v===0?"var(--line)":"var(--line-soft)")+'" stroke-width="1"></line>';
-    o += '<text x="'+(L-6)+'" y="'+(Y(v)+3).toFixed(1)+'" font-size="8.5" text-anchor="end" fill="var(--muted)" font-family="IBM Plex Mono, monospace">'+(v>0?"+":"")+v+'%</text>';
-  });
-
-  var bands = [[0.55,0.63],[0.63,0.71],[0.71,0.79],[0.79,0.92]];
-  bands.forEach(function(b){
-    var inb = CLOSED.filter(function(c){ return c.conf>=b[0] && c.conf<b[1]; });
-    if(!inb.length) return;
-    var m = inb.reduce(function(a,c){ return a+c.real; },0)/inb.length;
-    var x0 = X(b[0]), x1 = X(b[1]);
-    o += '<line x1="'+(x0+3).toFixed(1)+'" y1="'+Y(m).toFixed(1)+'" x2="'+(x1-3).toFixed(1)+'" y2="'+Y(m).toFixed(1)+'" stroke="var(--ink-2)" stroke-width="2.5" stroke-linecap="round"><title>band mean '+m.toFixed(2)+'% over '+inb.length+' trades</title></line>';
-  });
-
-  o += '<line x1="'+X(0.55).toFixed(1)+'" y1="'+T+'" x2="'+X(0.55).toFixed(1)+'" y2="'+(H-B)+'" stroke="var(--ink)" stroke-width="1.5" stroke-dasharray="3 3"></line>';
-  o += '<text x="'+(X(0.55)+5).toFixed(1)+'" y="'+(T+9)+'" font-size="8.5" fill="var(--ink-2)" font-family="IBM Plex Mono, monospace">0.55 floor</text>';
-
-  CLOSED.forEach(function(c){
-    o += '<circle cx="'+X(c.conf).toFixed(1)+'" cy="'+Y(c.real).toFixed(1)+'" r="3.8" fill="'+(c.real>0?"var(--up)":"var(--down)")+'" opacity=".85"><title>'+c.s+'  conf '+c.conf.toFixed(2)+'  result '+c.real.toFixed(2)+'%</title></circle>';
-  });
-
-  [0.55,0.65,0.75,0.85].forEach(function(v){
-    o += '<text x="'+X(v).toFixed(1)+'" y="'+(H-8)+'" font-size="8.5" text-anchor="middle" fill="var(--muted)" font-family="IBM Plex Mono, monospace">'+v.toFixed(2)+'</text>';
-  });
-  document.getElementById("scatter").innerHTML = o;
-
-  var n = CLOSED.length;
-  var mx = CLOSED.reduce(function(a,c){ return a+c.conf; },0)/n;
-  var my = CLOSED.reduce(function(a,c){ return a+c.real; },0)/n;
-  var num=0, dx=0, dy=0;
-  CLOSED.forEach(function(c){ num += (c.conf-mx)*(c.real-my); dx += Math.pow(c.conf-mx,2); dy += Math.pow(c.real-my,2); });
-  var r = num / Math.sqrt(dx*dy);
-  var wins = CLOSED.filter(function(c){ return c.real>0; }).length;
-
-  document.getElementById("sc-count").textContent = n + " closed";
-  document.getElementById("sc-verdict").textContent =
-    "n = " + n + ", " + wins + " closed up. Correlation between confidence and realized move is r = " + r.toFixed(2) +
-    ". At this sample size that is indistinguishable from noise, so the 0.55 floor is an assumption, not a measured rule. Revisit at n = 100.";
-}
-
-/* ---------------- funnel ---------------- */
+/* ---------------- funnel (from /api/funnel - the same rows a direct SQL
+   count would see, per acceptance criterion 5) ---------------- */
 function drawFunnel(){
-  var n = rows.length;
-  var conf = rows.filter(function(r){ return (r.at||9) > 1; }).length;
-  var sized = rows.filter(function(r){ return reached(r) >= 3; }).length;
-  var sent  = sized;
-  var fills = rows.filter(function(r){ return r.end==="fill"; }).length;
-
-  var data = [
-    {n:n,     l:"signals evaluated"},
-    {n:conf,  l:"cleared confidence"},
-    {n:sized, l:"received a size"},
-    {n:sent,  l:"sent to broker"},
-    {n:fills, l:"filled"}
-  ];
-
+  if(!funnelData) return;
+  var data = funnelData.stages;
   var s = document.getElementById("stages"); s.innerHTML = "";
   data.forEach(function(d, i){
     var w = el("div","stage");
     w.appendChild(el("span","stage-n mono", String(d.n)));
-    w.appendChild(el("span","stage-l", d.l));
+    w.appendChild(el("span","stage-l", d.label));
     s.appendChild(w);
     if(i < data.length-1) s.appendChild(el("div","arrow"));
   });
 
+  var n = data[0].n, filled = data[4].n, sent = data[3].n, cleared = data[1].n;
   var t = document.getElementById("track"); t.innerHTML = "";
   function seg(count, color){
-    var i = el("i"); i.style.flex = String(count); i.style.background = color; t.appendChild(i);
+    var i = el("i"); i.style.flex = String(Math.max(count,0)); i.style.background = color; t.appendChild(i);
   }
-  seg(fills, "var(--up)");
-  seg(sent-fills, "var(--down)");
-  seg(conf-sent, "var(--hold)");
-  seg(n-conf, "var(--line)");
+  seg(filled, "var(--up)");
+  seg(Math.max(sent-filled,0), "var(--down)");
+  seg(Math.max(cleared-sent,0), "var(--hold)");
+  seg(Math.max(n-cleared,0), "var(--line)");
 
-  var lowConf = n - conf;
-  var noSize  = conf - sent;
-  var failed  = sent - fills;
   var d = document.getElementById("drops"); d.innerHTML = "";
   function drop(count, label, mild){
     if(!count) return;
     var c = el("div", mild ? "drop mild" : "drop");
-    c.appendChild(el("b", null, "\u2212" + count));
+    c.appendChild(el("b", null, "−" + count));
     c.appendChild(el("span", null, label));
     d.appendChild(c);
   }
-  drop(lowConf, "forecast below confidence floor", true);
-  drop(noSize,  "weight under minimum ticket or exposure cap", true);
-  drop(failed,  "rejected after the webhook was sent", false);
+  funnelData.drops.forEach(function(dr){ drop(dr.count, dr.label, dr.mild); });
   if(!d.children.length) d.appendChild(el("div","drop","Every signal reached the broker."));
   drawDayStrip();
 }
@@ -892,7 +744,7 @@ function visible(){
   return rows;
 }
 
-function drawLedger(freshId){
+function drawLedger(){
   var host = document.getElementById("ledger");
   host.innerHTML = "";
   var list = visible();
@@ -900,10 +752,10 @@ function drawLedger(freshId){
 
   list.forEach(function(r){
     var i = rows.indexOf(r);
-    var b = el("button", "row" + (r.t===freshId ? " fresh" : ""));
+    var b = el("button", "row");
     b.setAttribute("role","option");
     b.setAttribute("aria-selected", i===sel ? "true" : "false");
-    b.onclick = function(){ sel = i; drawLedger(); drawDetail(); };
+    b.onclick = function(){ sel = i; selectedId = r.id; drawLedger(); drawDetail(); };
 
     b.appendChild(el("span","r-time mono", r.t));
 
@@ -934,11 +786,30 @@ function drawLedger(freshId){
 }
 
 /* ---------------- detail ---------------- */
-function drawDetail(){
-  var r = rows[sel];
-  var host = document.getElementById("detail");
-  host.innerHTML = "";
+function kv(pairs){
+  var d = el("dl","kv");
+  pairs.forEach(function(p){
+    d.appendChild(el("dt", null, p[0]));
+    d.appendChild(el("dd", p[2] || null, p[1]));
+  });
+  return d;
+}
 
+async function drawDetail(){
+  var host = document.getElementById("detail");
+  if(sel < 0 || !rows[sel]){ host.innerHTML = ""; return; }
+  var r = rows[sel];
+
+  var full = detailCache[r.id];
+  if(!full && r.sig){
+    try {
+      full = await getJSON("/api/decisions/" + r.id);
+      detailCache[r.id] = full;
+    } catch(e){ full = null; }
+  }
+  if(r.id !== selectedId) return; // selection moved while the fetch was in flight
+
+  host.innerHTML = "";
   var top = el("div","d-top");
   var line = el("div");
   line.appendChild(el("span","d-tick", r.tick));
@@ -958,14 +829,14 @@ function drawDetail(){
     else cls += "off";
 
     var s = el("div", cls);
-    var node = el("div","node", n <= got ? (n===got && r.end==="fill" ? "\u2713" : (n===got && r.end==="bad" ? "\u2715" : st.n)) : st.n);
+    var node = el("div","node", n <= got ? (n===got && r.end==="fill" ? "✓" : (n===got && r.end==="bad" ? "✕" : st.n)) : st.n);
     s.appendChild(node);
 
     var col = el("div");
     col.appendChild(el("h3", null, st.h));
 
     if(st.k==="sig" && r.sig){
-      col.appendChild(forecastChart(r));
+      col.appendChild(forecastChart(r.sig, full ? full.forecast : null));
       col.appendChild(confBar(r.sig.h));
       col.appendChild(kv([
         ["Predicted move", r.sig.dir, r.sig.dir.charAt(0)==="+" ? "pos" : "neg"],
@@ -982,7 +853,7 @@ function drawDetail(){
       ]));
     }
     if(st.k==="hook" && r.hook){
-      col.appendChild(kv([["Response", r.hook.code + (r.hook.ok ? " accepted" : " rejected")]]));
+      col.appendChild(kv([["Response", (r.hook.code != null ? r.hook.code : "—") + (r.hook.ok ? " accepted" : " rejected")]]));
       col.appendChild(budgetBar(r));
       var p = el("pre","payload", JSON.stringify(r.hook.body, null, 2));
       col.appendChild(p);
@@ -991,15 +862,11 @@ function drawDetail(){
       col.appendChild(kv([
         ["Quantity", String(r.fill.qty)],
         ["Price", r.fill.px],
-        ["Slippage", r.fill.slip, r.fill.slip.charAt(0)==="+" ? "neg" : "pos"],
         ["Venue", r.fill.venue]
       ]));
     }
     if(n === got && r.why){
       col.appendChild(el("div","reason " + (r.end==="bad" ? "bad" : "halt"), r.why));
-    }
-    if(st.k==="hook" && r.warn){
-      col.appendChild(el("div","reason", r.warn));
     }
     if(n > got){
       col.appendChild(el("div","reason", "Not reached."));
@@ -1012,70 +879,220 @@ function drawDetail(){
   host.appendChild(spine);
 }
 
-function kv(pairs){
-  var d = el("dl","kv");
-  pairs.forEach(function(p){
-    d.appendChild(el("dt", null, p[0]));
-    d.appendChild(el("dd", p[2] || null, p[1]));
+/* ---------------- exposure ---------------- */
+function drawExposure(){
+  var positions = positionsData.positions || [];
+  var equity = positionsData.equity_usd || 0;
+  var capFrac = positionsData.max_gross_exposure || 0.6;
+  var grossFrac = positionsData.gross_exposure || 0;
+
+  var CAP = capFrac * 100, gross = grossFrac * 100;
+  var frac = capFrac ? Math.min(1, grossFrac / capFrac) : 0;
+  var R = 33, C = 2*Math.PI*R;
+  document.getElementById("expring").innerHTML =
+    '<circle cx="42" cy="42" r="'+R+'" fill="none" stroke="var(--line-soft)" stroke-width="9"></circle>' +
+    '<circle cx="42" cy="42" r="'+R+'" fill="none" stroke="var(--accent)" stroke-width="9" stroke-linecap="round" ' +
+    'stroke-dasharray="'+(C*frac).toFixed(1)+' '+C.toFixed(1)+'" transform="rotate(-90 42 42)"></circle>';
+  document.getElementById("exp-n").textContent = gross.toFixed(1) + "%";
+  document.getElementById("exp-r").textContent = (CAP-gross).toFixed(1) + " points";
+  document.getElementById("exp-cap-label").textContent = "cap " + CAP.toFixed(0) + "%";
+
+  var host = document.getElementById("wbars"); host.innerHTML = "";
+  positions.slice().sort(function(a,b){ return (b.qty*b.entry_price) - (a.qty*a.entry_price); }).forEach(function(x){
+    var w = equity ? (x.qty * x.entry_price / equity * 100) : 0;
+    var row = el("div","wbar");
+    row.appendChild(el("span","wbar-s", x.symbol));
+    var t = el("div","wbar-t"), f = el("div","wbar-f");
+    f.style.width = Math.min(100, (w/20*100)).toFixed(1) + "%";
+    t.appendChild(f); row.appendChild(t);
+    row.appendChild(el("span","wbar-v", w.toFixed(1) + "%"));
+    host.appendChild(row);
   });
-  return d;
 }
 
-/* ---------------- positions ---------------- */
-var POS = [
-  {s:"NVDA",    q:"6",     e:"1,042.38", m:"1,061.20", p:"+112.92"},
-  {s:"ETH/USD", q:"0.610", e:"2,458.00", m:"2,502.40", p:"+27.08"},
-  {s:"BTC/USD", q:"0.042", e:"71,844",   m:"71,120",   p:"-30.41"}
-];
+/* ---------------- positions table ---------------- */
 function drawPositions(){
+  var positions = positionsData.positions || [];
   var b = document.getElementById("positions"); b.innerHTML = "";
-  POS.forEach(function(p){
+  positions.forEach(function(p){
     var tr = el("tr");
-    tr.appendChild(el("td","sym", p.s));
-    ["q","e","m"].forEach(function(k){
-      var td = el("td","num r", p[k]); tr.appendChild(td);
-    });
-    var pl = el("td", "num r " + (p.p.charAt(0)==="+" ? "pos-v" : "neg-v"), p.p);
-    tr.appendChild(pl);
+    tr.appendChild(el("td","sym", p.symbol));
+    tr.appendChild(el("td","num r", String(p.qty)));
+    tr.appendChild(el("td","num r", Number(p.entry_price).toFixed(2)));
+    tr.appendChild(el("td","num r", "—")); // no live mark price feed in milestone 1
+    tr.appendChild(el("td","num r", "—"));
     b.appendChild(tr);
   });
-  document.getElementById("pcount").textContent = POS.length + " open";
+  document.getElementById("pcount").textContent = positions.length + " open";
 }
 
-/* ---------------- live feed ---------------- */
-function synth(){
-  var tick = POOL[Math.floor(Math.random()*POOL.length)];
-  var conf = 0.38 + Math.random()*0.42;
-  var up = Math.random() > 0.42;
-  var move = (up?"+":"-") + (Math.random()*1.8+0.1).toFixed(2) + "%";
-  var now = new Date();
-  var t = String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0")+":"+String(now.getSeconds()).padStart(2,"0");
-  var base = {t:t, tick:tick, sig:{h:conf, dir:move, hz:"4h", ctx:512}};
-
-  if(conf < 0.55){
-    base.verb="skip"; base.lat=(70+Math.floor(Math.random()*40))+"ms"; base.end="halt"; base.at=1;
-    base.why="Forecast confidence "+conf.toFixed(2)+" is below the 0.55 floor. No size requested.";
-    return base;
+/* ---------------- scorecard: forecast vs outcome ---------------- */
+function drawOverlay(){
+  document.getElementById("ov-chips").innerHTML = "";
+  if(!scorecard.length){
+    document.getElementById("ov-count").textContent = "0 closed";
+    document.getElementById("overlay").innerHTML =
+      '<text x="12" y="75" font-size="12" fill="var(--muted)" font-family="Archivo, sans-serif">No closed decisions with a recorded outcome yet.</text>';
+    document.getElementById("ov-stats").innerHTML = "";
+    return;
   }
-  var qty = Math.max(1, Math.floor(Math.random()*20));
-  var px = (80+Math.random()*900).toFixed(2);
-  base.verb = up ? "buy" : "sell";
-  base.size = {w:(2+Math.random()*10).toFixed(1)+"%", qty:qty, px:px, cap:(1+Math.random()*6).toFixed(1)+"% of equity"};
-  base.lat = (240+Math.floor(Math.random()*260))+"ms";
-  base.hook = {ok:true, code:200, body:{ticker:tick, action:base.verb, orderType:"market", quantity:qty}};
-  base.end="fill";
-  base.fill = {qty:qty, px:px, slip:(Math.random()>0.5?"+":"-")+(Math.random()*0.4).toFixed(2), venue: tick.indexOf("/")>0 ? "Coinbase paper" : "IBKR paper"};
-  return base;
+  if(ovSel >= scorecard.length) ovSel = 0;
+  var c = scorecard[ovSel];
+  var ref = c.ref_price;
+  var predPath, realPath, band;
+  try {
+    predPath = JSON.parse(c.forecast_path).map(function(v){ return (v-ref)/ref*100; });
+    realPath = JSON.parse(c.realized_path).map(function(v){ return (v-ref)/ref*100; });
+    band = JSON.parse(c.forecast_band).map(function(b){ return [(b[0]-ref)/ref*100, (b[1]-ref)/ref*100]; });
+  } catch(e){
+    document.getElementById("overlay").innerHTML =
+      '<text x="12" y="75" font-size="12" fill="var(--muted)" font-family="Archivo, sans-serif">Malformed forecast/outcome data for this decision.</text>';
+    return;
+  }
+  var n = Math.max(predPath.length, realPath.length, 1); // exits can land before or after the forecast horizon
+
+  var W = 340, H = 150, L = 34, R = 8, T = 10, B = 22;
+  var vals = predPath.concat(realPath).concat(band.reduce(function(a,b){ return a.concat(b); }, [])).concat([0]);
+  var lo = Math.min.apply(null, vals) * 1.15, hi = Math.max.apply(null, vals) * 1.15;
+  if(hi - lo < 1){ hi += 0.5; lo -= 0.5; }
+  var X = function(i){ return L + ((i+1)/n) * (W-L-R); };
+  var Y = function(v){ return T + (1 - (v-lo)/(hi-lo)) * (H-T-B); };
+
+  var up = [], dn = [];
+  band.forEach(function(b, i){
+    up.push(X(i).toFixed(1)+" "+Y(b[1]).toFixed(1));
+    dn.unshift(X(i).toFixed(1)+" "+Y(b[0]).toFixed(1));
+  });
+  var o = "";
+  o += '<path d="M '+L+' '+Y(0).toFixed(1)+' L '+up.join(" L ")+' L '+dn.join(" L ")+' Z" fill="var(--accent)" opacity=".16"></path>';
+  o += '<line x1="'+L+'" y1="'+Y(0).toFixed(1)+'" x2="'+(W-R)+'" y2="'+Y(0).toFixed(1)+'" stroke="var(--line)" stroke-width="1"></line>';
+  [hi, 0, lo].forEach(function(v){
+    o += '<text x="'+(L-6)+'" y="'+(Y(v)+3).toFixed(1)+'" font-size="8.5" text-anchor="end" fill="var(--muted)" font-family="IBM Plex Mono, monospace">'+(v>0?"+":"")+v.toFixed(1)+'%</text>';
+  });
+  function line(arr, stroke, dash, w){
+    var d = "M "+L+" "+Y(0).toFixed(1)+" " + arr.map(function(v,i){ return "L "+X(i).toFixed(1)+" "+Y(v).toFixed(1); }).join(" ");
+    return '<path d="'+d+'" fill="none" stroke="'+stroke+'" stroke-width="'+w+'" stroke-linecap="round" stroke-linejoin="round"'+(dash?' stroke-dasharray="4 3"':'')+'></path>';
+  }
+  o += line(predPath, "var(--accent)", true, 1.8);
+  o += line(realPath, "var(--ink)", false, 2);
+  var lastIdx = realPath.length - 1;
+  o += '<circle cx="'+X(lastIdx).toFixed(1)+'" cy="'+Y(realPath[lastIdx]).toFixed(1)+'" r="3" fill="var(--ink)"></circle>';
+  o += '<text x="'+L+'" y="'+(H-6)+'" font-size="8.5" fill="var(--muted)" font-family="IBM Plex Mono, monospace">entry</text>';
+  o += '<text x="'+(W-R)+'" y="'+(H-6)+'" font-size="8.5" text-anchor="end" fill="var(--muted)" font-family="IBM Plex Mono, monospace">+'+lastIdx+' bars</text>';
+  document.getElementById("overlay").innerHTML = o;
+
+  var chips = document.getElementById("ov-chips");
+  scorecard.slice(0, 10).forEach(function(x, i){
+    var b = el("button","tchip");
+    b.setAttribute("aria-pressed", i===ovSel ? "true" : "false");
+    var hit = (x.predicted_pct > 0) === (x.realized_pct > 0);
+    var u = el("u"); u.style.background = hit ? "var(--up)" : "var(--down)";
+    b.appendChild(u); b.appendChild(document.createTextNode(x.symbol));
+    b.onclick = function(){ ovSel = i; drawOverlay(); };
+    chips.appendChild(b);
+  });
+
+  var hit = (c.predicted_pct>0) === (c.realized_pct>0);
+  var lastBand = band[band.length-1];
+  var inside = lastBand ? (realPath[realPath.length-1] >= lastBand[0] && realPath[realPath.length-1] <= lastBand[1]) : false;
+  var st = document.getElementById("ov-stats"); st.innerHTML = "";
+  [
+    ["Forecast said", (c.predicted_pct>0?"+":"")+c.predicted_pct.toFixed(2)+"%", ""],
+    ["Actually did", (c.realized_pct>0?"+":"")+c.realized_pct.toFixed(2)+"%", c.realized_pct>0?"pos":"neg"],
+    ["Direction", hit ? "right" : "wrong", hit?"pos":"neg"],
+    ["Inside the cone", inside ? "yes" : "no", inside?"pos":"neg"]
+  ].forEach(function(s){
+    var w = el("div","stat " + s[2]);
+    w.appendChild(el("b", null, s[1]));
+    w.appendChild(el("span", null, s[0]));
+    st.appendChild(w);
+  });
+  document.getElementById("ov-count").textContent = c.symbol + " · " + fmtTime(c.closed_at);
 }
 
-setInterval(function(){
-  if(!live) return;
-  var r = synth();
-  rows.unshift(r);
-  if(rows.length > 40) rows.pop();
-  if(sel >= 0) sel = sel + 1;
-  drawFunnel(); drawLedger(r.t); drawDetail();
-}, 7000);
+/* ---------------- scorecard: confidence vs result ---------------- */
+function drawScatter(){
+  var W = 340, H = 186, L = 36, R = 10, T = 12, B = 26;
+  var xlo = 0.50, xhi = 0.92, ylo = -5, yhi = 5;
+  var X = function(v){ return L + ((v-xlo)/(xhi-xlo))*(W-L-R); };
+  var Y = function(v){ return T + (1-(v-ylo)/(yhi-ylo))*(H-T-B); };
+
+  if(!scorecard.length){
+    document.getElementById("sc-count").textContent = "0 closed";
+    document.getElementById("scatter").innerHTML =
+      '<text x="12" y="90" font-size="12" fill="var(--muted)" font-family="Archivo, sans-serif">No closed decisions with a recorded outcome yet.</text>';
+    document.getElementById("sc-verdict").textContent =
+      "The 0.55 confidence floor is a placeholder per SPEC.md until enough closed trades exist to test it.";
+    return;
+  }
+
+  var o = "";
+  [-4,-2,0,2,4].forEach(function(v){
+    o += '<line x1="'+L+'" y1="'+Y(v).toFixed(1)+'" x2="'+(W-R)+'" y2="'+Y(v).toFixed(1)+'" stroke="'+(v===0?"var(--line)":"var(--line-soft)")+'" stroke-width="1"></line>';
+    o += '<text x="'+(L-6)+'" y="'+(Y(v)+3).toFixed(1)+'" font-size="8.5" text-anchor="end" fill="var(--muted)" font-family="IBM Plex Mono, monospace">'+(v>0?"+":"")+v+'%</text>';
+  });
+
+  if(scorecard.length >= 4){
+    var bands = [[0.55,0.63],[0.63,0.71],[0.71,0.79],[0.79,0.92]];
+    bands.forEach(function(b){
+      var inb = scorecard.filter(function(c){ return c.confidence>=b[0] && c.confidence<b[1]; });
+      if(!inb.length) return;
+      var m = inb.reduce(function(a,c){ return a+c.realized_pct; },0)/inb.length;
+      var x0 = X(b[0]), x1 = X(b[1]);
+      o += '<line x1="'+(x0+3).toFixed(1)+'" y1="'+Y(m).toFixed(1)+'" x2="'+(x1-3).toFixed(1)+'" y2="'+Y(m).toFixed(1)+'" stroke="var(--ink-2)" stroke-width="2.5" stroke-linecap="round"><title>band mean '+m.toFixed(2)+'% over '+inb.length+' trades</title></line>';
+    });
+  }
+
+  o += '<line x1="'+X(0.55).toFixed(1)+'" y1="'+T+'" x2="'+X(0.55).toFixed(1)+'" y2="'+(H-B)+'" stroke="var(--ink)" stroke-width="1.5" stroke-dasharray="3 3"></line>';
+  o += '<text x="'+(X(0.55)+5).toFixed(1)+'" y="'+(T+9)+'" font-size="8.5" fill="var(--ink-2)" font-family="IBM Plex Mono, monospace">0.55 floor</text>';
+
+  scorecard.forEach(function(c){
+    o += '<circle cx="'+X(c.confidence).toFixed(1)+'" cy="'+Y(c.realized_pct).toFixed(1)+'" r="3.8" fill="'+(c.realized_pct>0?"var(--up)":"var(--down)")+'" opacity=".85"><title>'+c.symbol+'  conf '+c.confidence.toFixed(2)+'  result '+c.realized_pct.toFixed(2)+'%</title></circle>';
+  });
+
+  [0.55,0.65,0.75,0.85].forEach(function(v){
+    o += '<text x="'+X(v).toFixed(1)+'" y="'+(H-8)+'" font-size="8.5" text-anchor="middle" fill="var(--muted)" font-family="IBM Plex Mono, monospace">'+v.toFixed(2)+'</text>';
+  });
+  document.getElementById("scatter").innerHTML = o;
+
+  var n = scorecard.length;
+  var wins = scorecard.filter(function(c){ return c.realized_pct>0; }).length;
+  document.getElementById("sc-count").textContent = n + " closed";
+
+  if(n < 5){
+    document.getElementById("sc-verdict").textContent =
+      "n = " + n + ", " + wins + " closed up. Too few closed trades to say anything about confidence vs. outcome yet - " +
+      "the 0.55 floor stays an unproven placeholder per SPEC.md until n is large enough to test it.";
+    return;
+  }
+
+  var mx = scorecard.reduce(function(a,c){ return a+c.confidence; },0)/n;
+  var my = scorecard.reduce(function(a,c){ return a+c.realized_pct; },0)/n;
+  var num=0, dx=0, dy=0;
+  scorecard.forEach(function(c){ num += (c.confidence-mx)*(c.realized_pct-my); dx += Math.pow(c.confidence-mx,2); dy += Math.pow(c.realized_pct-my,2); });
+  var r = (dx && dy) ? num / Math.sqrt(dx*dy) : 0;
+
+  document.getElementById("sc-verdict").textContent =
+    "n = " + n + ", " + wins + " closed up. Correlation between confidence and realized move is r = " + r.toFixed(2) +
+    ". At this sample size that is indistinguishable from noise, so the 0.55 floor is an assumption, not a measured rule. Revisit at n = 100.";
+}
+
+/* ---------------- refresh cycle ---------------- */
+async function refreshAll(){
+  try {
+    await Promise.all([loadDecisions(), loadFunnel(), loadPositions(), loadScorecard()]);
+    updateNotice();
+    drawFunnel(); drawLedger(); await drawDetail(); drawPositions(); drawExposure();
+    drawOverlay(); drawScatter();
+  } catch(e){
+    var notice = document.getElementById("notice");
+    notice.style.display = "";
+    document.getElementById("notice-detail").textContent =
+      "Could not reach the local API (" + e.message + "). Is \"python -m src.server.app\" running?";
+  }
+}
+
+setInterval(function(){ if(live) refreshAll(); }, 8000);
 
 /* ---------------- controls ---------------- */
 document.getElementById("filters").addEventListener("click", function(e){
@@ -1091,6 +1108,7 @@ document.getElementById("feed").onclick = function(){
   live = !live;
   this.textContent = live ? "Pause feed" : "Resume feed";
   this.setAttribute("aria-pressed", live ? "true" : "false");
+  if(live) refreshAll();
 };
 
 var themeBtn = document.getElementById("theme");
@@ -1113,18 +1131,18 @@ document.getElementById("ledger").addEventListener("keydown", function(e){
   var i = list.indexOf(rows[sel]);
   i = Math.min(list.length-1, Math.max(0, i + (e.key==="ArrowDown" ? 1 : -1)));
   sel = rows.indexOf(list[i]);
+  selectedId = rows[sel] ? rows[sel].id : null;
   drawLedger(); drawDetail();
 });
 
 function tick(){
   var d = new Date();
   document.getElementById("clock").textContent =
-    String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0")+":"+String(d.getSeconds()).padStart(2,"0");
+    String(d.getUTCHours()).padStart(2,"0")+":"+String(d.getUTCMinutes()).padStart(2,"0")+":"+String(d.getUTCSeconds()).padStart(2,"0")+" UTC";
 }
 setInterval(tick, 1000); tick();
 
-drawFunnel(); drawLedger(); drawDetail(); drawPositions(); drawExposure();
-drawOverlay(); drawScatter();
+refreshAll();
 })();
 </script>
 </body>

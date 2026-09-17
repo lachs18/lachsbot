@@ -1,0 +1,37 @@
+# Universe, asset class and calendar configuration.
+#
+# Design rule (per build decision): a second asset class must be addable
+# as a second config file plus a second TradersPost webhook URL, without
+# touching src/signal, src/risk or src/log. Nothing in those layers reads
+# this file directly for symbol meaning - they only ever see the Signal /
+# Allocation types.
+
+asset_class: crypto
+
+# Trading calendar plug point. `null` means "always open" (src/data/calendar.py
+# NullCalendar). A stock universe later supplies a session-hours calendar here
+# instead - the scheduler asks the calendar object, never asset_class directly.
+calendar: null
+
+timeframe: 1h
+context_bars: 512
+
+data_provider:
+  kind: ccxt
+  exchange: coinbase   # ccxt exchange id. Same source is used for backtest and live (per build decision).
+  quote: USD
+
+# Name of the environment variable holding this universe's TradersPost
+# webhook URL. Never the URL itself - see .env.example.
+webhook_url_env: TRADERSPOST_WEBHOOK_URL_CRYPTO
+
+symbols:
+  - symbol: BTC/USD
+    tolerance_bps: 15     # entry limit price tolerance band, basis points around ref_price
+    min_qty: 0.0001
+  - symbol: ETH/USD
+    tolerance_bps: 15
+    min_qty: 0.001
+  - symbol: SOL/USD
+    tolerance_bps: 25
+    min_qty: 0.01
