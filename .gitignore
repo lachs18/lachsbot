@@ -1,0 +1,13 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+data/decisions.db
+data/decisions.db-wal
+data/decisions.db-shm
+data/bars_cache.db
+data/bars_cache.db-wal
+data/bars_cache.db-shm
+HALT
+.venv/
+*.egg-info/

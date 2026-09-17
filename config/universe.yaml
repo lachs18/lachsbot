@@ -1,0 +1,69 @@
+# Universe, asset class and calendar configuration.
+#
+# Design rule (per build decision): a second asset class must be addable
+# as a second config file plus a second TradersPost webhook URL, without
+# touching src/signal, src/risk or src/log. Nothing in those layers reads
+# this file directly for symbol meaning - they only ever see the Signal /
+# Allocation types.
+
+asset_class: crypto
+
+# Name of the TradersPost strategy this universe posts to. Written into
+# every decisions row's `strategy` column, so a decision can always be
+# traced to which TradersPost strategy it was meant for - matters once
+# more than one exists side by side. This is TradersPost's own strategy
+# display name (set in its UI), not this project's codename ("kronos-1h",
+# used for the repo, the terminal title, and the db filename - unrelated).
+strategy_name: LachsBot
+
+# Trading calendar plug point. `null` means "always open" (src/data/calendar.py
+# NullCalendar). A stock universe later supplies a session-hours calendar here
+# instead - the scheduler asks the calendar object, never asset_class directly.
+calendar: null
+
+timeframe: 1h
+context_bars: 512
+
+data_provider:
+  kind: ccxt
+  exchange: coinbase   # ccxt exchange id. Same source is used for backtest and live (per build decision).
+  quote: USD
+
+# Name of the environment variable holding this universe's TradersPost
+# webhook URL. Never the URL itself - see .env.example.
+webhook_url_env: TRADERSPOST_WEBHOOK_URL_CRYPTO
+
+# Reconciliation only (cli.py reconcile) - TradersPost has no order-history
+# API, so this compares against the broker's own order history instead.
+# `exchange` here must match whichever venue TradersPost is actually
+# executing through for this universe - unconfirmed, since broker choice
+# is still open decision #1 in SPEC.md. Defaulting to the same exchange
+# already used for market data (coinbase) as the most coherent guess until
+# that's finalized. The key behind these env vars MUST be read-only.
+broker:
+  kind: ccxt
+  exchange: coinbase
+  api_key_env: BROKER_API_KEY_CRYPTO
+  api_secret_env: BROKER_API_SECRET_CRYPTO
+
+# `symbol` is the internal/ccxt notation (slash-separated, e.g. BTC/USD) -
+# every layer except execution uses this and only this. `traderspost_ticker`
+# is the same instrument in TradersPost's own notation (hyphen-separated,
+# e.g. BTC-USD) - the execution layer looks this up and puts it in the
+# webhook payload instead of `symbol`. Kept here, explicit and visible,
+# rather than a string substitution (e.g. replacing "/" with "-") buried in
+# code, because a substitution can silently do the wrong thing for a symbol
+# it wasn't written for; a table can't.
+symbols:
+  - symbol: BTC/USD
+    traderspost_ticker: BTC-USD
+    tolerance_bps: 15     # entry limit price tolerance band, basis points around ref_price
+    min_qty: 0.0001
+  - symbol: ETH/USD
+    traderspost_ticker: ETH-USD
+    tolerance_bps: 15
+    min_qty: 0.001
+  - symbol: SOL/USD
+    traderspost_ticker: SOL-USD
+    tolerance_bps: 25
+    min_qty: 0.01
