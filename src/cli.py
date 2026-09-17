@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 import yaml
+from dotenv import load_dotenv
 
 from src.broker import client as broker_client
 from src.data import ccxt_provider
@@ -28,6 +29,8 @@ from src.signal import sma
 from src.types import PortfolioState, Refusal
 
 ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(ROOT / ".env")  # no-op if the file doesn't exist - never overrides an already-exported var
+
 STRATEGY = "kronos-1h"
 MODE = "paper"
 

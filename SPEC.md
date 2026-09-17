@@ -199,6 +199,8 @@ So:
 - **Protect price with `limitPrice`, not with the clock.** A limit order states directly what you will not pay. A time cutoff only guesses at it
 - **Fix inference time rather than budgeting around it.** Measure it from day one and keep it under two seconds. Kronos-small is 24.7M parameters, which is fast on GPU and slow on CPU. If it ever exceeds five seconds, that is a bug ticket, not a tuning knob
 
+**`rejectAfter` does nothing until a setting in TradersPost's own UI is turned on.** Per TradersPost's documentation, the field is only honored when "Allow signal overrides" is enabled on the strategy, together with the matching "Reject entry if signal is older than" / "Reject exit if signal is older than" toggle. This lives entirely in TradersPost's strategy settings - no code in this repo can set it, and there is no way to verify it from here. **Acceptance criterion 8 (a forced delay produces a rejected webhook) depends on this being on.** If it's off, `rejectAfter: 30` is sent on every payload and silently ignored - the webhook gets accepted regardless of age, and criterion 8 will look like a failure that is actually a one-checkbox setup gap. Check this before troubleshooting anything else if criterion 8 doesn't behave as documented. See `docs/SETUP.md` for exactly where this checkbox lives.
+
 ### Limit price policy
 
 Entries are limit orders at the reference price plus a tolerance band, expressed in basis points and configurable per asset class. Exits are market orders, because the cost of not exiting is larger than the cost of a slightly worse fill.
@@ -392,13 +394,15 @@ Automated trading raises transaction frequency by design, which in Switzerland c
 
 ## Open decisions
 
-Claude Code cannot start milestone 1 without answers to the first three. The rest can be decided while it builds.
+Claude Code could not start milestone 1 without answers to the first three - they're now resolved (see below). The rest can be decided while it builds.
 
 ### Blocking
 
-1. **Which broker.** This gates everything. TradersPost connects to brokers but does not hold money, so the question is which broker accepts a Swiss resident and is also supported by TradersPost. Interactive Brokers is the one clearly built for it. Alpaca supports many non-US residents but not every jurisdiction and asks you to confirm your country with them directly. Confirm the broker first, then confirm TradersPost supports it, in that order
-2. **Asset class and universe.** Stocks, futures or crypto, and which 5 to 10 symbols. This determines the data provider, the trading calendar, and whether the scheduler runs 24/7 or on session hours
-3. **Data provider.** Broker feed, or a separate source. Affects cost, history depth and whether backtest and live see the same bars, which matters more than it sounds
+Resolved as of the milestone 1 build - kept here rather than deleted, so the reasoning that led here stays visible.
+
+1. **Broker: Coinbase, confirmed.** Coinbase is the execution venue - TradersPost places orders there directly, holding its own Coinbase execution credentials inside TradersPost's own settings. This repo never sees that credential and has no code path that could use one (see "Secrets"). Separately, and unrelated to it, `cli.py reconcile` holds its own **read-only** Coinbase API key (`BROKER_API_KEY_CRYPTO` / `BROKER_API_SECRET_CRYPTO` in `.env`), scoped to view-only with no trade or transfer permission, used only to pull order history for the audit in "Reconciliation." Two separate keys, two separate purposes: one lives entirely inside TradersPost and this repo never touches it, the other lives in this repo and `src/broker/client.py` refuses to use it if it can ever place an order.
+2. **Asset class and universe.** Crypto, config-driven via `config/universe.yaml` - see the file layout and "Reconciliation" for how a second asset class would be added
+3. **Data provider: Coinbase via CCXT, confirmed.** Same exchange as the broker (#1) for both roles, so backtest and live see identical prices rather than two venues quietly drifting apart - which was exactly the risk this open decision existed to flag
 
 ### Decide during milestone 1
 
