@@ -8,6 +8,8 @@ Build a signal-to-broker pipeline for liquid instruments on hourly bars, plus a 
 
 **Optimise for one thing: nothing reaches the broker that is not explained in the event log first.** If an order appears in TradersPost with no matching decision chain in the local database, that is the highest-severity bug in the system, regardless of whether the trade made money.
 
+**This guarantee is enforced by `cli.py reconcile`, and reconcile is heuristic, not exact - see "Reconciliation" below.** TradersPost provides no order-ID feedback loop: our webhook's `decision_id` does not travel to the broker, and nothing comes back to us that would let a decision and a broker order be tied together with certainty. Reconcile pairs them off by symbol, side, and quantity instead, which is a best-effort statistical match, not a cryptographic one. It reliably catches a *count* mismatch - an extra order with nothing to explain it, or a decision with nothing filled for it - which is the failure this guarantee actually cares about. What it cannot rule out is two decisions of identical shape (same symbol, side, and quantity, close in time) being paired against each other's orders rather than their own; the count stays right, so this failure mode passes silently. Accept this precision going into milestone 5, or narrow it further (e.g. spacing entries so identical-shape collisions can't occur within one `since_hours` window) before trusting it with real size.
+
 ### In scope
 
 - Hourly-bar signals over a fixed universe of liquid symbols
@@ -19,7 +21,7 @@ Build a signal-to-broker pipeline for liquid instruments on hourly bars, plus a 
 ### Explicitly out of scope
 
 - Memecoins, DEXes, on-chain execution, wallet handling. Different project, different risk model
-- Any code that holds a broker API key or a private key. TradersPost owns broker credentials, this repo never does
+- Any code that holds a broker API key or a private key **for trading**. TradersPost owns broker credentials for placing orders, this repo never does. One narrow, deliberate exception: a read-only broker key for reconciliation only - see "Secrets"
 - Sub-minute or intrabar logic. TradersPost documents itself as not intended for strategies below the 1-minute timeframe, and the whole design assumes hourly bars
 - Order management beyond entry and exit. No trailing logic, no scaling in, no averaging down
 - Any web-facing deployment. This runs on localhost and nowhere else
@@ -207,7 +209,14 @@ Use `cancelAfter` so an unfilled entry does not sit on the book into the next ba
 
 **Amended after milestone 1 review.** The original wording below assumed TradersPost exposes an order-history API. It does not: as of writing, TradersPost's own documentation states account and order data access is still roadmap/waitlist only, for every user, regardless of account status. TradersPost's own guidance for this kind of check is to reconcile against the broker's API directly instead.
 
-Once a day, compare the **configured broker's** order history (via CCXT, using a read-only API key - see Secrets) against the `decisions` table. Broker orders do not carry our `decision_id`: TradersPost places the order at the broker on our behalf, and there is no confirmed mechanism for our webhook's `metadata` to survive that hop (unverified - no live broker account exists yet to check). So matching is heuristic rather than exact: a sent decision counts as matched if the broker shows a closed order for the same symbol, same side, and a quantity within 0.5%, filled within a configurable window of when the webhook was sent. Any sent decision with no such match is a critical alert. This is weaker than an exact `decision_id` match would be, but it is what a broker order object actually offers, and it still catches the one failure this check exists for: an order that reached the market with no corresponding row in our own log.
+Once a day, compare the **configured broker's** order history (via CCXT, using a read-only API key - see Secrets) against the `decisions` table. Broker orders do not carry our `decision_id`: TradersPost places the order at the broker on our behalf, and there is no confirmed mechanism for our webhook's `metadata` to survive that hop, and no order-ID feedback loop back to us either way (unverified - no live broker account exists yet to check). So matching is heuristic rather than exact: a candidate pairing is a broker order for the same symbol, same side, and a quantity within 0.5%, filled within a configurable window of when the webhook was sent.
+
+Pairing is **strictly one-to-one** - a maximum bipartite matching (Kuhn's algorithm) between sent decisions and broker orders for each symbol, not "first candidate wins." That distinction matters: with two identical decisions and two identical candidate orders, first-match-wins can flag both as ambiguous when they should simply pair off, one each. Maximum matching gets the pairing right and lets the real anomalies surface on their own:
+
+- a decision left unmatched after the largest possible pairing is a critical alert - an order may be missing, or never reached the broker
+- a broker order left unmatched after the largest possible pairing is a critical alert too - either a genuine orphan (nothing in our log explains it) or the surplus half of a suspected duplicate order (e.g. the webhook fired twice for one decision)
+
+Either failure exits non-zero. See the note under Scope for exactly what this heuristic can and cannot rule out - it catches a count mismatch reliably, but not two same-shaped decisions swapped against each other's orders.
 
 This is the check that enforces the one rule from the scope section, and it needs to exist before going live, not after.
 

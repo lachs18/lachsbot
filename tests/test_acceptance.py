@@ -202,6 +202,102 @@ def test_reconcile_clean_when_every_sent_order_is_matched(_isolated_db, monkeypa
     assert cli.reconcile() == 0
 
 
+def test_reconcile_flags_duplicate_order_as_failure(_isolated_db, monkeypatch, caplog):
+    """Strictly one-to-one matching: with one decision and two identical
+    candidate orders, the decision itself pairs off fine with one of them
+    (it isn't the anomaly), but the surplus order has nothing else to
+    explain it - a suspected duplicate (e.g. the webhook fired twice) -
+    and reconcile must still fail loudly rather than silently drop it."""
+    conn = db_module.connect(_isolated_db)
+    decision_id = _sent_decision(conn, quantity=0.01)
+    conn.close()
+
+    monkeypatch.setattr(cli.broker_client, "load_client_from_env", lambda *a, **kw: object())
+    monkeypatch.setattr(
+        cli.broker_client, "fetch_closed_orders",
+        lambda client, symbol, since_ms=None: [
+            {"side": "buy", "filled": 0.01},
+            {"side": "buy", "filled": 0.01},
+        ],
+    )
+
+    with caplog.at_level(logging.ERROR, logger="kronos1h"):
+        assert cli.reconcile() == 1
+
+    messages = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
+    assert any("duplicate" in m.lower() for m in messages)
+
+    conn = db_module.connect(_isolated_db)
+    row = conn.execute("SELECT outcome FROM decisions WHERE id=?", (decision_id,)).fetchone()
+    assert row["outcome"] == "pending"  # the decision itself matched fine - it isn't the anomaly
+    conn.close()
+
+
+def test_reconcile_matches_one_to_one_not_many_to_many(_isolated_db, monkeypatch):
+    """Two decisions and two orders for the same symbol/side/quantity must
+    each be paired off one-to-one, not both matched against a single order."""
+    conn = db_module.connect(_isolated_db)
+    _sent_decision(conn, quantity=0.01)
+    _sent_decision(conn, quantity=0.01)
+    conn.close()
+
+    monkeypatch.setattr(cli.broker_client, "load_client_from_env", lambda *a, **kw: object())
+    monkeypatch.setattr(
+        cli.broker_client, "fetch_closed_orders",
+        lambda client, symbol, since_ms=None: [
+            {"side": "buy", "filled": 0.01},
+            {"side": "buy", "filled": 0.01},
+        ],
+    )
+
+    assert cli.reconcile() == 0
+
+
+def test_reconcile_matches_the_larger_side_when_orders_are_scarce(_isolated_db, monkeypatch):
+    """Two decisions but only one candidate order: exactly one decision
+    should end up unmatched, not both - the maximum matching should not
+    leave a pairing on the table just because more than one decision
+    could theoretically claim the same single order."""
+    conn = db_module.connect(_isolated_db)
+    _sent_decision(conn, quantity=0.01)
+    _sent_decision(conn, quantity=0.01)
+    conn.close()
+
+    monkeypatch.setattr(cli.broker_client, "load_client_from_env", lambda *a, **kw: object())
+    monkeypatch.setattr(
+        cli.broker_client, "fetch_closed_orders",
+        lambda client, symbol, since_ms=None: [{"side": "buy", "filled": 0.01}],
+    )
+
+    assert cli.reconcile() == 1  # one decision necessarily goes unmatched - correctly, not both
+
+    conn = db_module.connect(_isolated_db)
+    outcomes = [r["outcome"] for r in conn.execute("SELECT outcome FROM decisions").fetchall()]
+    assert outcomes.count("failed") == 1
+    assert outcomes.count("pending") == 1
+    conn.close()
+
+
+def test_reconcile_flags_orphan_broker_order_with_no_decision(_isolated_db, monkeypatch):
+    """One decision but two orders where only one decision exists at all:
+    the extra order has nothing in the log to explain it - the exact
+    failure SPEC.md's Scope section calls the highest-severity bug."""
+    conn = db_module.connect(_isolated_db)
+    _sent_decision(conn, quantity=0.01)
+    conn.close()
+
+    monkeypatch.setattr(cli.broker_client, "load_client_from_env", lambda *a, **kw: object())
+    monkeypatch.setattr(
+        cli.broker_client, "fetch_closed_orders",
+        lambda client, symbol, since_ms=None: [
+            {"side": "buy", "filled": 0.01},
+            {"side": "buy", "filled": 0.03},  # different quantity - not a candidate match, so it's an orphan
+        ],
+    )
+
+    assert cli.reconcile() == 1
+
+
 def test_reconcile_refuses_a_write_scoped_key(_isolated_db, monkeypatch):
     """check_read_only() must run before any order-history call, so a
     trade-capable key never gets used even accidentally - and reconcile

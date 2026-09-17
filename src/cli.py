@@ -249,15 +249,25 @@ def reconcile(since_hours: int = 26) -> int:
     "Secrets" for the full reasoning and the read-only-key requirement
     this depends on.
 
-    Matching is heuristic, not exact: broker order objects do not carry
-    our decision_id (TradersPost places the order on our behalf, and
-    there is no confirmed way for our webhook metadata to survive that
-    hop). A sent decision counts as matched if the broker shows a closed
-    order for the same symbol and side, with quantity within 0.5%, in the
-    last `since_hours` hours. That is weaker than an exact id match, but
-    it is what a broker order object actually offers, and it still catches
-    the one failure this exists for: an order the broker filled with
-    nothing in our own log to show for it.
+    Matching is heuristic, not exact, and strictly one-to-one. Broker
+    order objects do not carry our decision_id (TradersPost places the
+    order on our behalf, and there is no confirmed way for our webhook
+    metadata to survive that hop, nor any order-ID feedback loop back to
+    us) - see SPEC.md's Scope section for what that costs the "nothing
+    reaches the broker unexplained" guarantee. A candidate match is a
+    broker order for the same symbol and side, quantity within 0.5%,
+    filled in the last `since_hours` hours.
+
+    Pairing is a maximum bipartite matching (Kuhn's algorithm) per symbol,
+    not first-match-wins: with N decisions and N identical candidate
+    orders, every decision is correctly paired off one-to-one rather than
+    all of them contending over the same one. What survives after the
+    largest possible pairing is the real signal:
+    - a decision left unmatched means no order could be found for it
+    - an order left unmatched means nothing in our log explains it - a
+      genuine orphan, or the surplus half of a suspected duplicate order
+      (e.g. the webhook fired twice for one decision)
+    Either is a critical alert and a non-zero exit.
     """
     universe_cfg, _ = load_config()
     broker_cfg = universe_cfg.get("broker")
@@ -275,40 +285,78 @@ def reconcile(since_hours: int = 26) -> int:
 
     conn = db.connect()
     sent = conn.execute(
-        "SELECT id, symbol, action, quantity FROM decisions WHERE stopped_at>=3 AND webhook_status BETWEEN 200 AND 299"
+        "SELECT id, symbol, action, quantity FROM decisions WHERE stopped_at>=3 AND webhook_status BETWEEN 200 AND 299 "
+        "ORDER BY created_at ASC"
     ).fetchall()
 
     since_ms = int((datetime.now(UTC) - timedelta(hours=since_hours)).timestamp() * 1000)
-    orders_by_symbol: dict[str, list[dict]] = {}
-    unmatched = []
-
+    decisions_by_symbol: dict[str, list] = {}
     for row in sent:
-        symbol = row["symbol"]
-        if symbol not in orders_by_symbol:
-            orders_by_symbol[symbol] = broker_client.fetch_closed_orders(client, symbol, since_ms)
+        decisions_by_symbol.setdefault(row["symbol"], []).append(row)
+
+    def _is_candidate(order: dict, row) -> bool:
         side = "buy" if row["action"] == "buy" else "sell"
         qty = row["quantity"] or 0
-        match = next(
-            (
-                o for o in orders_by_symbol[symbol]
-                if o.get("side") == side and qty and abs((o.get("filled") or 0) - qty) <= qty * 0.005
-            ),
-            None,
-        )
-        if match is None:
-            unmatched.append(row)
+        return order.get("side") == side and bool(qty) and abs((order.get("filled") or 0) - qty) <= qty * 0.005
 
-    if unmatched:
-        logger.error("reconcile FAILED: %d sent decision(s) with no matching broker order", len(unmatched))
-        for row in unmatched:
+    unmatched_decisions: list = []
+    orphan_orders: list[tuple[str, dict]] = []
+
+    for symbol, rows in decisions_by_symbol.items():
+        orders = broker_client.fetch_closed_orders(client, symbol, since_ms)
+        matched_order_for_decision = _max_bipartite_match(rows, orders, _is_candidate)
+
+        for idx, row in enumerate(rows):
+            if idx not in matched_order_for_decision:
+                unmatched_decisions.append(row)
+
+        matched_order_indices = set(matched_order_for_decision.values())
+        for order_idx, order in enumerate(orders):
+            if order_idx not in matched_order_indices:
+                orphan_orders.append((symbol, order))
+
+    if unmatched_decisions or orphan_orders:
+        for row in unmatched_decisions:
             writer.mark_reconciliation_failure(conn, row["id"], "no matching order found in broker order history")
             logger.error("  unmatched decision, no broker order found: %s (%s)", row["id"], row["symbol"])
+        for symbol, order in orphan_orders:
+            logger.error(
+                "  unmatched broker order with no logged decision (orphan, or a duplicate of one that "
+                "already matched): %s %s", symbol, order,
+            )
+        logger.error(
+            "reconcile FAILED: %d unmatched decision(s), %d orphan/duplicate broker order(s)",
+            len(unmatched_decisions), len(orphan_orders),
+        )
         conn.close()
         return 1
 
-    logger.info("reconcile OK: %d sent decision(s) matched against broker order history", len(sent))
+    logger.info("reconcile OK: %d sent decision(s) matched 1:1 against broker order history", len(sent))
     conn.close()
     return 0
+
+
+def _max_bipartite_match(rows: list, orders: list[dict], is_candidate) -> dict[int, int]:
+    """Kuhn's algorithm: the largest possible one-to-one pairing between
+    decision rows and broker orders, so a symmetric group (e.g. two
+    identical decisions and two identical orders) pairs off cleanly
+    instead of every row seeing every order as a competing candidate."""
+    order_to_row: dict[int, int] = {}
+
+    def try_assign(row_idx: int, visited: set[int]) -> bool:
+        for order_idx, order in enumerate(orders):
+            if order_idx in visited or not is_candidate(order, rows[row_idx]):
+                continue
+            visited.add(order_idx)
+            if order_idx not in order_to_row or try_assign(order_to_row[order_idx], visited):
+                order_to_row[order_idx] = row_idx
+                return True
+        return False
+
+    for row_idx in range(len(rows)):
+        try_assign(row_idx, set())
+
+    return {row_idx: order_idx for order_idx, row_idx in order_to_row.items()}
 
 
 def main(argv: list[str] | None = None) -> int:
