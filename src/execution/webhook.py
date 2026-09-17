@@ -37,14 +37,25 @@ def build_payload(
     decision_id: str,
     limit_price: float | None,
     now: datetime,
+    traderspost_ticker: str,
     reject_after: int = 30,
     cancel_after: int | None = 1800,
 ) -> dict:
+    """`traderspost_ticker` must be the already-translated ticker from
+    config/universe.yaml (e.g. BTC-USD), never `alloc.symbol` (the internal
+    ccxt notation, e.g. BTC/USD) - see that file for why the mapping lives
+    there and not as a substitution here. Checked, not assumed: a slash
+    reaching this far means the caller skipped the config lookup."""
     if not 1 <= reject_after <= 30:
         raise ValueError("rejectAfter must be 1..30 per TradersPost's own limits")
+    if "/" in traderspost_ticker:
+        raise ValueError(
+            f"ticker {traderspost_ticker!r} looks like internal ccxt notation, not a TradersPost "
+            "ticker - use the traderspost_ticker mapping in config/universe.yaml, not alloc.symbol"
+        )
 
     payload: dict = {
-        "ticker": alloc.symbol,
+        "ticker": traderspost_ticker,
         "action": alloc.action,
         "orderType": alloc.order_type,
         "time": now.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S"),
@@ -70,6 +81,7 @@ def submit(
     decision_id: str,
     webhook_url: str,
     tolerance_bps: float,
+    traderspost_ticker: str,
     reject_after: int = 30,
     cancel_after: int | None = 1800,
     timeout_s: float = 10.0,
@@ -77,7 +89,7 @@ def submit(
 ) -> WebhookResult:
     now = now or datetime.now(UTC)
     limit_price = compute_limit_price(alloc, tolerance_bps)
-    payload = build_payload(alloc, decision_id, limit_price, now, reject_after, cancel_after)
+    payload = build_payload(alloc, decision_id, limit_price, now, traderspost_ticker, reject_after, cancel_after)
     body = json.dumps(payload)
 
     if not webhook_url:

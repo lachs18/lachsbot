@@ -44,9 +44,12 @@ def test_compute_limit_price_only_for_limit_buys():
 def test_build_payload_matches_traderspost_documented_fields():
     alloc = _alloc()
     now = datetime(2026, 9, 17, 13, 0, 0, tzinfo=UTC)
-    payload = build_payload(alloc, "decision-123", limit_price=61200.5, now=now, reject_after=30, cancel_after=1800)
+    payload = build_payload(
+        alloc, "decision-123", limit_price=61200.5, now=now, traderspost_ticker="BTC-USD",
+        reject_after=30, cancel_after=1800,
+    )
 
-    assert payload["ticker"] == "BTC/USD"
+    assert payload["ticker"] == "BTC-USD"
     assert payload["action"] == "buy"
     assert payload["orderType"] == "limit"
     assert payload["quantity"] == alloc.quantity
@@ -60,7 +63,7 @@ def test_build_payload_matches_traderspost_documented_fields():
 
 def test_build_payload_exit_omits_quantity():
     alloc = _alloc(action="exit", order_type="market")
-    payload = build_payload(alloc, "d1", None, datetime.now(UTC))
+    payload = build_payload(alloc, "d1", None, datetime.now(UTC), traderspost_ticker="BTC-USD")
     assert "quantity" not in payload
     assert "limitPrice" not in payload
 
@@ -68,12 +71,31 @@ def test_build_payload_exit_omits_quantity():
 def test_reject_after_out_of_range_raises():
     alloc = _alloc()
     with pytest.raises(ValueError):
-        build_payload(alloc, "d1", None, datetime.now(UTC), reject_after=45)
+        build_payload(alloc, "d1", None, datetime.now(UTC), traderspost_ticker="BTC-USD", reject_after=45)
+
+
+def test_build_payload_rejects_ccxt_notation_ticker():
+    """The one guard this module owns: config/universe.yaml does the actual
+    translation, but build_payload refuses to send a slash-notation ticker
+    regardless, in case a caller ever passes alloc.symbol through by mistake."""
+    alloc = _alloc()
+    with pytest.raises(ValueError, match="ccxt notation"):
+        build_payload(alloc, "d1", None, datetime.now(UTC), traderspost_ticker=alloc.symbol)
+
+
+def test_build_payload_ticker_never_contains_a_slash():
+    """Acceptance test for the TradersPost ticker-notation fix: whatever
+    reaches the payload must be TradersPost's hyphen notation, never ccxt's
+    slash notation - this must fail if that regresses."""
+    alloc = _alloc()
+    payload = build_payload(alloc, "d1", None, datetime.now(UTC), traderspost_ticker="BTC-USD")
+    assert "/" not in payload["ticker"]
+    assert payload["ticker"] == "BTC-USD"
 
 
 def test_submit_with_no_webhook_url_configured_fails_cleanly():
     alloc = _alloc()
-    result = submit(alloc, "d1", webhook_url="", tolerance_bps=15)
+    result = submit(alloc, "d1", webhook_url="", tolerance_bps=15, traderspost_ticker="BTC-USD")
     assert result.ok is False
     assert result.status is None
     assert "webhook url" in result.error.lower()
@@ -125,18 +147,22 @@ def fixture_server():
 
 def test_webhook_body_is_byte_identical_to_what_the_server_received(fixture_server):
     alloc = _alloc()
-    result = submit(alloc, "decision-abc", fixture_server, tolerance_bps=15, now=datetime.now(UTC))
+    result = submit(alloc, "decision-abc", fixture_server, tolerance_bps=15, traderspost_ticker="BTC-USD", now=datetime.now(UTC))
     assert result.ok is True
     assert result.status == 200
     assert len(_FixtureHandler.received) == 1
     assert _FixtureHandler.received[0] == result.body_sent.encode("utf-8")
+    assert json.loads(_FixtureHandler.received[0])["ticker"] == "BTC-USD"
 
 
 def test_forced_60_second_delay_is_rejected(fixture_server):
     """Acceptance criterion 8: a forced delay produces a rejected webhook."""
     alloc = _alloc()
     stale_now = datetime.now(UTC) - timedelta(seconds=61)
-    result = submit(alloc, "decision-stale", fixture_server, tolerance_bps=15, reject_after=30, now=stale_now)
+    result = submit(
+        alloc, "decision-stale", fixture_server, tolerance_bps=15, traderspost_ticker="BTC-USD",
+        reject_after=30, now=stale_now,
+    )
     assert result.ok is False
     assert result.status == 400
     assert "older" in result.response_text.lower() or "reject" in result.response_text.lower()

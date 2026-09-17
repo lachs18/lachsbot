@@ -31,7 +31,6 @@ from src.types import PortfolioState, Refusal
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")  # no-op if the file doesn't exist - never overrides an already-exported var
 
-STRATEGY = "kronos-1h"
 MODE = "paper"
 
 logger = logging.getLogger("kronos1h")
@@ -69,6 +68,7 @@ def run_once(bar_close: str | None = None) -> int:
         return 1
 
     universe_cfg, risk_cfg = load_config()
+    strategy = universe_cfg["strategy_name"]
     exchange = universe_cfg["data_provider"]["exchange"]
     timeframe = universe_cfg["timeframe"]
     timeframe_minutes = ccxt_provider.TIMEFRAME_MINUTES[timeframe]
@@ -93,7 +93,7 @@ def run_once(bar_close: str | None = None) -> int:
             bc = bar_close or datetime.now(UTC).isoformat()
             stage_ms = {"data": int(t_data * 1000), "inference": 0, "risk": 0, "network": 0}
             writer.create_data_halt(
-                conn, symbol, bc, STRATEGY, MODE, f"data layer: {exc}", stage_ms,
+                conn, symbol, bc, strategy, MODE, f"data layer: {exc}", stage_ms,
                 latency_ms=int((time.perf_counter() - t0) * 1000),
             )
             logger.warning("data halt for %s: %s", symbol, exc)
@@ -103,7 +103,7 @@ def run_once(bar_close: str | None = None) -> int:
         sig = sma.forecast(bars, symbol, horizon_bars=horizon_bars)
         t_inference = time.perf_counter() - t1
 
-        decision_id = writer.create_decision(conn, sig, STRATEGY, MODE)
+        decision_id = writer.create_decision(conn, sig, strategy, MODE)
         entries[symbol] = {"decision_id": decision_id, "t_data": t_data, "t_inference": t_inference, "t0": t0}
         signals.append(sig)
 
@@ -125,6 +125,7 @@ def run_once(bar_close: str | None = None) -> int:
     t_risk = time.perf_counter() - t_risk0
 
     tol_by_symbol = {s["symbol"]: s["tolerance_bps"] for s in universe_cfg["symbols"]}
+    ticker_by_symbol = {s["symbol"]: s["traderspost_ticker"] for s in universe_cfg["symbols"]}
     consecutive_failures = 0
     failure_limit = risk_cfg["consecutive_webhook_failures_halt"]
 
@@ -157,8 +158,12 @@ def run_once(bar_close: str | None = None) -> int:
             continue
 
         tolerance_bps = tol_by_symbol.get(result.symbol, 0.0)
+        traderspost_ticker = ticker_by_symbol[result.symbol]
         t_net0 = time.perf_counter()
-        wh = webhook.submit(result, decision_id, webhook_url, tolerance_bps, reject_after=30, cancel_after=1800)
+        wh = webhook.submit(
+            result, decision_id, webhook_url, tolerance_bps, traderspost_ticker,
+            reject_after=30, cancel_after=1800,
+        )
         stage_ms["network"] = int((time.perf_counter() - t_net0) * 1000)
         latency_ms = int((time.perf_counter() - e["t0"]) * 1000)
 

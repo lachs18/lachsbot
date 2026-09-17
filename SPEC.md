@@ -186,6 +186,14 @@ One strategy in TradersPost, one webhook URL, one asset class. The URL lives in 
 
 `metadata` carries the decision id so a TradersPost order can always be traced back to its row. Put custom fields there rather than at the top level, which is what the field is for.
 
+### Ticker notation: ccxt uses a slash, TradersPost uses a hyphen
+
+CCXT (and therefore every layer in this repo except execution) refers to a crypto pair as `BTC/USD`. TradersPost expects `BTC-USD`. Sending the wrong one produces a webhook TradersPost can't route.
+
+The internal/ccxt notation is the only one this codebase's `symbol` fields ever hold - `Signal.symbol`, `Allocation.symbol`, the `decisions.symbol` column, all of it. The translation happens in exactly one place: `config/universe.yaml`'s `symbols` list carries both spellings side by side (`symbol` for internal use, `traderspost_ticker` for the payload), and `src/execution/webhook.py::build_payload` is handed the already-translated ticker by its caller (`cli.py`) rather than deriving it itself. This is deliberate: a string substitution (replacing `/` with `-`) buried in the execution layer would look like it always works and can still be wrong for a symbol it wasn't written for; an explicit table in config can't drift silently, because it's the only source either notation ever comes from.
+
+`build_payload` still checks: it raises if the ticker it's given contains a `/`, on the assumption that a slash reaching that deep means a caller skipped the config lookup, not that the translation itself failed.
+
 ### rejectAfter is 30, and here is why
 
 `rejectAfter` accepts 1 to 30 seconds and rejects a signal older than that, measured against the `time` field when supplied.
