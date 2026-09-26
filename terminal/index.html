@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kronos-1h · decision terminal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ground:#EDF0F4; --surface:#FFFFFF; --surface-2:#F5F7FA; --raise:#FFFFFF;
+  --ink:#131C27; --ink-2:#47576B; --muted:#7C8A9B;
+  --line:#D5DCE5; --line-soft:#E7EBF1;
+  --accent:#3A38C8; --accent-soft:#E9E8FB;
+  --up:#0A7250; --up-soft:#E2F2EC;
+  --down:#BE3326; --down-soft:#FBE8E5;
+  --hold:#8A6D14; --hold-soft:#F7F0DC;
+  --shadow:0 1px 2px rgba(19,28,39,.06), 0 8px 24px -16px rgba(19,28,39,.28);
+  --sans:'Archivo', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono:'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0E141B; --surface:#161E28; --surface-2:#1C2530; --raise:#1F2933;
+    --ink:#E8EEF5; --ink-2:#A9B8C7; --muted:#74869A;
+    --line:#2B3744; --line-soft:#232E3A;
+    --accent:#918FFF; --accent-soft:#252059;
+    --up:#42D097; --up-soft:#10322A;
+    --down:#FF7A6B; --down-soft:#3A1F1E;
+    --hold:#DFBE58; --hold-soft:#332B12;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px -18px rgba(0,0,0,.9);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0E141B; --surface:#161E28; --surface-2:#1C2530; --raise:#1F2933;
+  --ink:#E8EEF5; --ink-2:#A9B8C7; --muted:#74869A;
+  --line:#2B3744; --line-soft:#232E3A;
+  --accent:#918FFF; --accent-soft:#252059;
+  --up:#42D097; --up-soft:#10322A;
+  --down:#FF7A6B; --down-soft:#3A1F1E;
+  --hold:#DFBE58; --hold-soft:#332B12;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 28px -18px rgba(0,0,0,.9);
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--ground); color:var(--ink);
+  font-family:var(--sans); font-size:15px; line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+}
+.mono{font-family:var(--mono); font-variant-numeric:tabular-nums; letter-spacing:-.01em}
+button{font:inherit; color:inherit; cursor:pointer; background:none; border:none}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:3px}
+
+.wrap{max-width:1360px; margin:0 auto; padding:0 20px 56px}
+
+/* ---------- top bar ---------- */
+.bar{
+  position:sticky; top:0; z-index:20;
+  background:color-mix(in srgb, var(--ground) 88%, transparent);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line);
+}
+.bar-in{
+  max-width:1360px; margin:0 auto; padding:11px 20px;
+  display:flex; align-items:center; gap:18px; flex-wrap:wrap;
+}
+.brand{display:flex; align-items:baseline; gap:10px; margin-right:auto}
+.brand b{font-weight:700; font-size:16px; letter-spacing:-.02em}
+.mode{
+  font-family:var(--mono); font-size:11px; font-weight:500;
+  padding:2px 7px; border-radius:3px;
+  background:var(--hold-soft); color:var(--hold);
+  border:1px solid color-mix(in srgb, var(--hold) 30%, transparent);
+}
+.links{display:flex; gap:14px; align-items:center}
+.link{display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-2)}
+.dot{width:7px; height:7px; border-radius:50%; background:var(--up); flex:none}
+.dot.warn{background:var(--hold)}
+.dot.off{background:var(--muted)}
+.clock{font-family:var(--mono); font-size:12.5px; color:var(--ink-2)}
+.ctl{
+  border:1px solid var(--line); background:var(--surface);
+  padding:5px 11px; border-radius:6px; font-size:12.5px; font-weight:500;
+}
+.ctl:hover{border-color:var(--accent); color:var(--accent)}
+
+/* ---------- notice ---------- */
+.notice{
+  margin:14px 0 0; padding:9px 13px; border-radius:7px;
+  background:var(--accent-soft); color:var(--accent);
+  font-size:13px; font-weight:500;
+  display:flex; gap:8px; align-items:baseline;
+}
+.notice span{color:color-mix(in srgb, var(--accent) 72%, var(--ink)); font-weight:400}
+
+/* ---------- hero funnel ---------- */
+.hero{margin:22px 0 8px}
+.hero h1{
+  font-size:13px; font-weight:600; color:var(--muted);
+  margin:0 0 14px; letter-spacing:.01em;
+}
+.funnel{
+  background:var(--surface); border:1px solid var(--line);
+  border-radius:12px; padding:22px 24px 18px; box-shadow:var(--shadow);
+}
+.stages{display:flex; align-items:flex-end; gap:0}
+.stage{flex:1; min-width:0; position:relative; padding-right:14px}
+.stage-n{
+  font-family:var(--mono); font-size:34px; font-weight:500;
+  letter-spacing:-.04em; line-height:1; display:block;
+}
+.stage-l{font-size:12.5px; color:var(--ink-2); margin-top:6px; display:block}
+.stage:last-child .stage-n{color:var(--up)}
+.arrow{
+  flex:none; width:26px; align-self:center; height:1px; background:var(--line);
+  position:relative; top:-14px;
+}
+.arrow::after{
+  content:''; position:absolute; right:0; top:-3px;
+  border-left:5px solid var(--line); border-top:3.5px solid transparent; border-bottom:3.5px solid transparent;
+}
+.track{
+  display:flex; height:6px; border-radius:3px; overflow:hidden;
+  margin:18px 0 12px; background:var(--surface-2);
+}
+.track i{display:block; height:100%}
+.drops{display:flex; flex-wrap:wrap; gap:6px 8px}
+.drop{
+  font-size:12px; padding:3px 9px; border-radius:20px;
+  border:1px solid var(--line); color:var(--ink-2); background:var(--surface-2);
+  display:flex; gap:7px; align-items:baseline;
+}
+.drop b{font-family:var(--mono); font-weight:600; color:var(--down)}
+.drop.mild b{color:var(--hold)}
+
+/* ---------- layout ---------- */
+.grid{display:grid; grid-template-columns:minmax(0,1.55fr) minmax(0,1fr); gap:18px; margin-top:22px; align-items:start}
+
+.panel{
+  background:var(--surface); border:1px solid var(--line);
+  border-radius:12px; box-shadow:var(--shadow); overflow:hidden;
+}
+.panel-head{
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  padding:13px 16px; border-bottom:1px solid var(--line-soft);
+}
+.panel-head h2{font-size:14px; font-weight:600; margin:0; letter-spacing:-.01em}
+.panel-head .count{font-family:var(--mono); font-size:12px; color:var(--muted); margin-right:auto}
+
+.filters{display:flex; gap:5px; flex-wrap:wrap}
+.chip{
+  font-size:12px; padding:3.5px 10px; border-radius:20px;
+  border:1px solid var(--line); color:var(--ink-2);
+}
+.chip[aria-pressed="true"]{background:var(--ink); color:var(--ground); border-color:var(--ink)}
+.chip:hover{border-color:var(--accent)}
+
+/* ---------- ledger ---------- */
+.ledger{max-height:560px; overflow-y:auto}
+.row{
+  display:grid; grid-template-columns:76px 58px 1fr 62px;
+  gap:12px; align-items:center; width:100%; text-align:left;
+  padding:11px 16px; border-bottom:1px solid var(--line-soft);
+}
+.row:hover{background:var(--surface-2)}
+.row[aria-selected="true"]{background:var(--accent-soft)}
+.row[aria-selected="true"] .r-tick{color:var(--accent)}
+.row.fresh{animation:land .7s ease}
+@keyframes land{from{background:var(--accent-soft)} to{background:transparent}}
+.r-time{font-family:var(--mono); font-size:12.5px; color:var(--muted)}
+.chain{display:flex; gap:4px; align-items:center}
+.chain i{
+  width:8px; height:8px; border-radius:2px; background:var(--line);
+  display:block; flex:none;
+}
+.chain i.on{background:var(--ink-2)}
+.chain i.end{background:var(--up)}
+.chain i.bad{background:var(--down)}
+.chain i.halt{background:var(--hold)}
+.r-body{min-width:0}
+.r-tick{font-weight:600; font-size:14px; letter-spacing:-.01em}
+.r-verb{
+  font-family:var(--mono); font-size:11px; font-weight:600;
+  padding:1px 6px; border-radius:3px; margin-left:7px; vertical-align:1px;
+}
+.v-buy{background:var(--up-soft); color:var(--up)}
+.v-sell,.v-exit{background:var(--down-soft); color:var(--down)}
+.v-skip{background:var(--surface-2); color:var(--muted); border:1px solid var(--line)}
+.r-note{font-size:12.5px; color:var(--ink-2); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.r-lat{font-family:var(--mono); font-size:12px; color:var(--muted); text-align:right}
+
+/* ---------- detail spine ---------- */
+.rail{display:flex; flex-direction:column; gap:18px; position:sticky; top:72px}
+.d-top{padding:16px 18px 14px; border-bottom:1px solid var(--line-soft)}
+.d-tick{font-size:22px; font-weight:700; letter-spacing:-.03em}
+.d-meta{font-family:var(--mono); font-size:12px; color:var(--muted); margin-top:3px}
+.spine{padding:6px 18px 18px}
+.step{display:grid; grid-template-columns:22px 1fr; gap:12px; position:relative; padding:14px 0 4px}
+.step::before{
+  content:''; position:absolute; left:10.5px; top:30px; bottom:-4px;
+  width:1px; background:var(--line);
+}
+.step:last-child::before{display:none}
+.node{
+  width:21px; height:21px; border-radius:50%; margin-top:1px;
+  border:1.5px solid var(--line); background:var(--surface);
+  display:grid; place-items:center; font-size:11px; font-weight:700; color:var(--muted);
+  font-family:var(--mono);
+}
+.step.ok .node{border-color:var(--ink); color:var(--ink)}
+.step.fin .node{border-color:var(--up); background:var(--up); color:var(--surface)}
+.step.bad .node{border-color:var(--down); background:var(--down); color:var(--surface)}
+.step.halt .node{border-color:var(--hold); background:var(--hold); color:var(--surface)}
+.step h3{margin:1px 0 0; font-size:13.5px; font-weight:600; letter-spacing:-.01em}
+.step.off h3{color:var(--muted)}
+.kv{margin:8px 0 0; display:grid; grid-template-columns:auto 1fr; gap:3px 14px; font-size:12.5px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0; font-family:var(--mono); font-size:12.5px; text-align:right; color:var(--ink)}
+.kv dd.pos{color:var(--up)} .kv dd.neg{color:var(--down)}
+.reason{
+  margin-top:8px; font-size:12.5px; line-height:1.5;
+  padding:8px 11px; border-radius:6px; color:var(--ink-2);
+  background:var(--surface-2); border-left:2px solid var(--line);
+}
+.reason.halt{background:var(--hold-soft); border-left-color:var(--hold); color:var(--hold)}
+.reason.bad{background:var(--down-soft); border-left-color:var(--down); color:var(--down)}
+pre.payload{
+  margin:8px 0 0; padding:11px 12px; border-radius:6px; overflow-x:auto;
+  background:var(--surface-2); border:1px solid var(--line-soft);
+  font-family:var(--mono); font-size:11.5px; line-height:1.6; color:var(--ink-2);
+}
+
+/* ---------- positions ---------- */
+.pos{width:100%; border-collapse:collapse; font-size:13px}
+.pos th{
+  text-align:left; font-size:11.5px; font-weight:500; color:var(--muted);
+  padding:9px 16px; border-bottom:1px solid var(--line-soft);
+}
+.pos th.r, .pos td.r{text-align:right}
+.pos td{padding:9px 16px; border-bottom:1px solid var(--line-soft)}
+.pos tr:last-child td{border-bottom:none}
+.pos td.sym{font-weight:600}
+.pos td.num{font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:12.5px}
+.pos td.pos-v{color:var(--up)} .pos td.neg-v{color:var(--down)}
+
+.foot{margin-top:24px; font-size:12.5px; color:var(--muted); max-width:70ch}
+
+/* ---------- visuals ---------- */
+svg.viz{display:block; width:100%; height:auto; overflow:visible}
+.strip{margin-top:18px; padding-top:14px; border-top:1px solid var(--line-soft)}
+.strip-h{display:flex; justify-content:space-between; align-items:baseline; font-size:12px; color:var(--muted); margin-bottom:8px}
+.strip-h b{font-family:var(--mono); font-weight:500; color:var(--ink-2)}
+
+.chart{margin-top:9px; padding:12px 12px 7px; background:var(--surface-2); border:1px solid var(--line-soft); border-radius:8px}
+.chart-cap{display:flex; justify-content:space-between; font-family:var(--mono); font-size:11px; color:var(--muted); margin-top:7px}
+
+.conf{margin-top:11px}
+.conf-track{height:9px; border-radius:5px; background:var(--surface-2); border:1px solid var(--line-soft); position:relative}
+.conf-fill{position:absolute; left:0; top:0; bottom:0; border-radius:5px 0 0 5px}
+.conf-floor{position:absolute; top:-4px; bottom:-4px; width:2px; background:var(--ink); border-radius:1px}
+.conf-legend{display:flex; justify-content:space-between; font-family:var(--mono); font-size:11px; color:var(--muted); margin-top:6px}
+
+.budget{margin-top:11px}
+.budget-track{height:20px; border-radius:5px; background:var(--surface-2); border:1px solid var(--line-soft); display:flex; overflow:hidden}
+.budget-track i{display:block; height:100%}
+.budget-legend{display:flex; gap:12px; flex-wrap:wrap; font-size:11.5px; color:var(--muted); margin-top:7px}
+.budget-legend span{display:flex; align-items:center; gap:5px}
+.budget-legend u{width:8px; height:8px; border-radius:2px; text-decoration:none; display:block}
+
+.ring{display:flex; align-items:center; gap:18px; padding:16px 16px 6px}
+.ring svg{flex:none; width:82px; height:82px}
+.ring-n{font-family:var(--mono); font-size:22px; font-weight:500; letter-spacing:-.03em; display:block; line-height:1.1}
+.ring-l{font-size:12.5px; color:var(--ink-2); margin-top:3px}
+.wbars{padding:6px 16px 16px; display:grid; gap:9px}
+.wbar{display:grid; grid-template-columns:70px 1fr 44px; gap:10px; align-items:center; font-size:12.5px}
+.wbar-s{font-weight:600}
+.wbar-t{height:8px; border-radius:4px; background:var(--surface-2); border:1px solid var(--line-soft); overflow:hidden}
+.wbar-f{height:100%; background:var(--accent); border-radius:4px}
+.wbar-v{font-family:var(--mono); font-size:12px; color:var(--ink-2); text-align:right}
+
+/* ---------- scorecard ---------- */
+.grid2{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px; margin-top:18px; align-items:start}
+.sc-body{padding:14px 16px 16px}
+.chips{display:flex; gap:5px; flex-wrap:wrap; margin-bottom:12px}
+.tchip{
+  font-family:var(--mono); font-size:11.5px; padding:3px 9px; border-radius:5px;
+  border:1px solid var(--line); color:var(--ink-2); display:flex; gap:6px; align-items:center;
+}
+.tchip u{width:6px; height:6px; border-radius:50%; text-decoration:none; display:block}
+.tchip[aria-pressed="true"]{border-color:var(--ink); background:var(--ink); color:var(--ground)}
+.stats{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-top:12px}
+.stat{border-left:2px solid var(--line); padding-left:10px}
+.stat b{display:block; font-family:var(--mono); font-size:16px; font-weight:500; letter-spacing:-.02em}
+.stat span{display:block; font-size:11.5px; color:var(--muted); margin-top:2px}
+.stat.pos{border-left-color:var(--up)} .stat.pos b{color:var(--up)}
+.stat.neg{border-left-color:var(--down)} .stat.neg b{color:var(--down)}
+.verdict{
+  margin:14px 0 0; padding:10px 12px; border-radius:7px; font-size:12.5px; line-height:1.5;
+  background:var(--hold-soft); color:var(--hold); border-left:2px solid var(--hold);
+}
+.legend-row{display:flex; gap:14px; flex-wrap:wrap; font-size:11.5px; color:var(--muted); margin-top:10px}
+.legend-row span{display:flex; align-items:center; gap:6px}
+.legend-row u{width:9px; height:9px; border-radius:50%; text-decoration:none; display:block}
+.legend-row u.dash{width:14px; height:0; border-top:2px dashed var(--accent); border-radius:0}
+
+@media (max-width:920px){
+  .grid2{grid-template-columns:1fr}
+  .stats{grid-template-columns:repeat(2,1fr)}
+}
+
+@media (max-width:920px){
+  .grid{grid-template-columns:1fr}
+  .rail{position:static}
+  .stages{flex-wrap:wrap; gap:16px 0}
+  .stage{flex:0 0 50%; padding-right:10px}
+  .arrow{display:none}
+  .stage-n{font-size:27px}
+  .ledger{max-height:none}
+  .row{grid-template-columns:64px 52px 1fr; gap:10px}
+  .r-lat{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none !important; transition:none !important}
+}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="bar-in">
+    <div class="brand">
+      <b>kronos-1h</b>
+      <span class="mode">paper</span>
+    </div>
+    <div class="links">
+      <span class="link"><i class="dot"></i>Signal: SMA 10/30 (milestone 1)</span>
+      <span class="link"><i class="dot"></i>Data: Coinbase via CCXT</span>
+      <span class="link"><i class="dot warn"></i>TradersPost: broker TBD</span>
+    </div>
+    <span class="clock mono" id="clock">--:--:--</span>
+    <button class="ctl" id="feed" aria-pressed="true">Pause feed</button>
+    <button class="ctl" id="theme">Dark</button>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <p class="notice" id="notice">Connecting to the local API. <span id="notice-detail">Loading /api/decisions...</span></p>
+
+  <section class="hero">
+    <h1 id="hero-label">Today, UTC</h1>
+    <div class="funnel">
+      <div class="stages" id="stages"></div>
+      <div class="track" id="track"></div>
+      <div class="drops" id="drops"></div>
+      <div class="strip">
+        <div class="strip-h"><span>Decisions through the session</span><b id="strip-note"></b></div>
+        <svg class="viz" id="daystrip" viewBox="0 0 640 40" preserveAspectRatio="none" role="img" aria-label="Decisions plotted across the trading session"></svg>
+      </div>
+    </div>
+  </section>
+
+  <div class="grid">
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Decision ledger</h2>
+        <span class="count" id="lcount"></span>
+        <div class="filters" id="filters">
+          <button class="chip" data-f="all" aria-pressed="true">All</button>
+          <button class="chip" data-f="sent" aria-pressed="false">Reached broker</button>
+          <button class="chip" data-f="stopped" aria-pressed="false">Stopped early</button>
+        </div>
+      </div>
+      <div class="ledger" id="ledger" role="listbox" aria-label="Decision ledger" tabindex="0"></div>
+    </section>
+
+    <div class="rail">
+      <section class="panel" id="detail"></section>
+      <section class="panel">
+        <div class="panel-head"><h2>Exposure</h2><span class="count" id="exp-cap-label">cap —</span></div>
+        <div class="ring">
+          <svg viewBox="0 0 84 84" id="expring" role="img" aria-label="Gross exposure against cap"></svg>
+          <div>
+            <span class="ring-n" id="exp-n"></span>
+            <div class="ring-l">gross exposure, <span id="exp-r"></span> of the cap left</div>
+          </div>
+        </div>
+        <div class="wbars" id="wbars"></div>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><h2>Open positions</h2><span class="count" id="pcount"></span></div>
+        <table class="pos">
+          <thead><tr><th>Symbol</th><th class="r">Qty</th><th class="r">Entry</th><th class="r">Mark</th><th class="r">P/L</th></tr></thead>
+          <tbody id="positions"></tbody>
+        </table>
+      </section>
+    </div>
+
+  </div>
+
+  <section class="grid2">
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Forecast against outcome</h2>
+        <span class="count" id="ov-count"></span>
+      </div>
+      <div class="sc-body">
+        <div class="chips" id="ov-chips"></div>
+        <svg class="viz" id="overlay" viewBox="0 0 340 150" role="img" aria-label="Predicted path against what actually happened"></svg>
+        <div class="legend-row">
+          <span><u class="dash"></u>forecast path</span>
+          <span><u style="background:var(--ink)"></u>what happened</span>
+          <span><u style="background:var(--accent);opacity:.35"></u>confidence cone</span>
+        </div>
+        <div class="stats" id="ov-stats"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Confidence against result</h2>
+        <span class="count" id="sc-count"></span>
+      </div>
+      <div class="sc-body">
+        <svg class="viz" id="scatter" viewBox="0 0 340 186" role="img" aria-label="Confidence score plotted against realized return"></svg>
+        <div class="legend-row">
+          <span><u style="background:var(--up)"></u>closed up</span>
+          <span><u style="background:var(--down)"></u>closed down</span>
+          <span><u style="background:var(--ink-2)"></u>average per band</span>
+        </div>
+        <p class="verdict" id="sc-verdict"></p>
+      </div>
+    </div>
+  </section>
+
+  <p class="foot">This terminal records what the system decided and why. Orders, fills and account balances live in TradersPost. Nothing here places a trade - every route above is a GET against the local read-only API.</p>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ---------------- state ---------------- */
+var rows = [];
+var selectedId = null;
+var sel = -1;
+var filter = "all";
+var live = true;
+var funnelData = null;
+var positionsData = { positions: [], equity_usd: 0, gross_exposure: 0, max_gross_exposure: 0.6 };
+var scorecard = [];
+var ovSel = 0;
+var detailCache = {};
+
+var STEPS = [
+  {k:"sig",  n:"1", h:"Signal (SMA 10/30 - Kronos arrives at milestone 2)"},
+  {k:"size", n:"2", h:"Risk sizing (fixed fractional - skfolio arrives at milestone 4)"},
+  {k:"hook", n:"3", h:"Webhook to TradersPost"},
+  {k:"fill", n:"4", h:"Broker fill"}
+];
+
+/* ---------------- helpers ---------------- */
+function el(t, c, x){ var e=document.createElement(t); if(c) e.className=c; if(x!=null) e.textContent=x; return e; }
+function reached(r){ return r.at || 1; }
+function passed(r){ return r.end==="fill" || r.end==="bad"; }
+function fmtLatency(ms){ return ms == null ? "—" : (ms < 1000 ? ms + "ms" : (ms/1000).toFixed(1) + "s"); }
+function fmtTime(iso){
+  try { return new Date(iso).toLocaleTimeString("en-GB", {hour12:false}); }
+  catch(e){ return iso || "—"; }
+}
+
+async function getJSON(url){
+  var resp = await fetch(url);
+  if(!resp.ok) throw new Error(url + " -> HTTP " + resp.status);
+  return resp.json();
+}
+
+/* ---------------- mapping DB rows onto the shape the UI renders ---------------- */
+function mapDecision(d){
+  var end = d.outcome === "filled" ? "fill" : (d.outcome === "failed" ? "bad" : "halt");
+  var mapped = {
+    id: d.id, t: fmtTime(d.bar_close), tick: d.symbol, verb: d.action || "skip",
+    lat: fmtLatency(d.latency_ms), latencyMs: d.latency_ms,
+    end: end, at: d.stopped_at, why: d.reason || "", raw: d
+  };
+  if(d.direction != null){
+    mapped.sig = {
+      h: d.confidence,
+      dir: (d.predicted_pct >= 0 ? "+" : "") + Number(d.predicted_pct).toFixed(2) + "%",
+      hz: d.horizon_bars + "h", ctx: d.context_bars
+    };
+  }
+  if(d.target_weight != null){
+    mapped.size = {
+      w: (d.target_weight*100).toFixed(1) + "%",
+      qty: d.quantity,
+      px: d.ref_price != null ? Number(d.ref_price).toFixed(2) : "—",
+      cap: "—"
+    };
+  }
+  if(d.webhook_status != null || d.webhook_body){
+    var body = {};
+    try { body = d.webhook_body ? JSON.parse(d.webhook_body) : {}; } catch(e){ body = {}; }
+    mapped.hook = { ok: d.webhook_status >= 200 && d.webhook_status < 300, code: d.webhook_status, body: body };
+  }
+  if(d.fill_qty != null){
+    mapped.fill = {
+      qty: d.fill_qty,
+      px: d.fill_price != null ? Number(d.fill_price).toFixed(2) : "—",
+      venue: d.venue || "—"
+    };
+  }
+  return mapped;
+}
+
+/* ---------------- data loading ---------------- */
+async function loadDecisions(){
+  var data = await getJSON("/api/decisions?limit=200");
+  rows = data.map(mapDecision);
+  if(selectedId){
+    var idx = rows.findIndex(function(r){ return r.id === selectedId; });
+    sel = idx >= 0 ? idx : (rows.length ? 0 : -1);
+  } else {
+    sel = rows.length ? 0 : -1;
+  }
+  selectedId = sel >= 0 ? rows[sel].id : null;
+}
+
+async function loadFunnel(){
+  funnelData = await getJSON("/api/funnel?date=today");
+}
+
+async function loadPositions(){
+  positionsData = await getJSON("/api/positions");
+}
+
+async function loadScorecard(){
+  scorecard = await getJSON("/api/scorecard");
+  if(ovSel >= scorecard.length) ovSel = 0;
+}
+
+/* ---------------- notice ---------------- */
+function updateNotice(){
+  var notice = document.getElementById("notice");
+  var detail = document.getElementById("notice-detail");
+  if(rows.length === 0){
+    notice.style.display = "";
+    detail.textContent = "No decisions logged yet. Run \"python -m src.cli run-once\" (or run-scheduled) to populate this terminal from the local API.";
+  } else {
+    notice.style.display = "none";
+  }
+}
+
+/* ---------------- forecast chart (real stored path, milestone 2's own acceptance
+   criterion - "draws from stored paths rather than anything generated
+   client-side" - is true from milestone 1 onward for this reason) ---------------- */
+function forecastChart(sig, forecast){
+  var W = 300, H = 92, SPLIT = 196;
+  if(!forecast){
+    var empty = el("div","chart");
+    empty.appendChild(el("div", null, "Forecast path unavailable for this decision."));
+    return empty;
+  }
+  var context = JSON.parse(forecast.context);
+  var path = JSON.parse(forecast.path);
+  var band = JSON.parse(forecast.band);
+
+  var all = context.concat(path);
+  var bandVals = [];
+  band.forEach(function(b){ bandVals.push(b[0], b[1]); });
+  var lo = Math.min.apply(null, all.concat(bandVals));
+  var hi = Math.max.apply(null, all.concat(bandVals));
+  var pad = (hi - lo) * 0.12 || 1;
+  lo -= pad; hi += pad;
+  var y = function(v){ return H - 6 - ((v - lo) / (hi - lo)) * (H - 12); };
+  var xh = function(i){ return (i / Math.max(1, context.length - 1)) * SPLIT; };
+  var xp = function(i){ return SPLIT + ((i + 1) / path.length) * (W - SPLIT); };
+
+  var hp = context.map(function(v,i){ return (i?"L":"M") + xh(i).toFixed(1) + " " + y(v).toFixed(1); }).join(" ");
+  var lastContext = context[context.length-1];
+  var pp = "M " + SPLIT + " " + y(lastContext).toFixed(1) + " " +
+    path.map(function(v,i){ return "L " + xp(i).toFixed(1) + " " + y(v).toFixed(1); }).join(" ");
+
+  var up = [], dn = [];
+  band.forEach(function(b, i){
+    up.push(xp(i).toFixed(1) + " " + y(b[1]).toFixed(1));
+    dn.unshift(xp(i).toFixed(1) + " " + y(b[0]).toFixed(1));
+  });
+  var fan = "M " + SPLIT + " " + y(lastContext).toFixed(1) + " L " + up.join(" L ") + " L " + dn.join(" L ") + " Z";
+  var good = path[path.length-1] >= lastContext;
+
+  var svg =
+    '<svg class="viz" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Forecast path">' +
+    '<path d="' + fan + '" fill="var(--accent)" opacity=".16"></path>' +
+    '<line x1="' + SPLIT + '" y1="2" x2="' + SPLIT + '" y2="' + (H-2) + '" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 3"></line>' +
+    '<path d="' + hp + '" fill="none" stroke="var(--ink-2)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"></path>' +
+    '<path d="' + pp + '" fill="none" stroke="' + (good ? "var(--up)" : "var(--down)") + '" stroke-width="1.8" stroke-dasharray="3.5 2.5" stroke-linecap="round"></path>' +
+    '<circle cx="' + SPLIT + '" cy="' + y(lastContext).toFixed(1) + '" r="2.6" fill="var(--ink)"></circle>' +
+    '</svg>';
+
+  var box = el("div","chart");
+  box.innerHTML = svg;
+  var cap = el("div","chart-cap");
+  cap.appendChild(el("span", null, context.length + " bars of context"));
+  cap.appendChild(el("span", null, (sig.hz||"") + " ahead  " + (sig.dir||"")));
+  box.appendChild(cap);
+  return box;
+}
+
+function confBar(h){
+  var FLOOR = 0.55, ok = h >= FLOOR;
+  var box = el("div","conf");
+  var track = el("div","conf-track");
+  var fill = el("div","conf-fill");
+  fill.style.width = (h*100).toFixed(1) + "%";
+  fill.style.background = ok ? "var(--up)" : "var(--hold)";
+  track.appendChild(fill);
+  var floor = el("div","conf-floor");
+  floor.style.left = (FLOOR*100) + "%";
+  track.appendChild(floor);
+  box.appendChild(track);
+  var lg = el("div","conf-legend");
+  lg.appendChild(el("span", null, "confidence " + h.toFixed(2)));
+  lg.appendChild(el("span", null, ok ? "clears the 0.55 floor" : "under the 0.55 floor"));
+  box.appendChild(lg);
+  return box;
+}
+
+/* ---------------- execution timing (real per-stage measurements from stage_ms,
+   not the guessed proportions the mock used) ---------------- */
+function budgetBar(r){
+  var DEADLINE = 30000;
+  var sm = { data:0, inference:0, risk:0, network:0 };
+  try { if(r.raw.stage_ms) sm = JSON.parse(r.raw.stage_ms); } catch(e){}
+  var parts = [
+    ["data fetch", sm.data, "var(--ink-2)"],
+    ["model inference", sm.inference, "var(--accent)"],
+    ["risk sizing", sm.risk, "var(--ink-2)"],
+    ["network", sm.network, "var(--hold)"]
+  ];
+  var box = el("div","budget");
+  var track = el("div","budget-track");
+  parts.forEach(function(p){
+    var i = el("i");
+    i.style.width = Math.min(100, (p[1]/DEADLINE)*100) + "%";
+    i.style.background = p[2];
+    track.appendChild(i);
+  });
+  var rest = el("i");
+  rest.style.flex = "1";
+  rest.style.background = "transparent";
+  track.appendChild(rest);
+  box.appendChild(track);
+
+  var lg = el("div","budget-legend");
+  parts.forEach(function(p){
+    var s = el("span");
+    var u = el("u"); u.style.background = p[2]; s.appendChild(u);
+    s.appendChild(document.createTextNode(p[0] + " " + Math.round(p[1]||0) + "ms"));
+    lg.appendChild(s);
+  });
+  var total = r.latencyMs || 0;
+  var head = total > DEADLINE*0.9;
+  var tail = el("span", null, head
+    ? "past the 30s rejectAfter deadline"
+    : ((DEADLINE-total)/1000).toFixed(1) + "s of the 30s deadline unused");
+  tail.style.color = head ? "var(--down)" : "var(--muted)";
+  tail.style.fontWeight = head ? "600" : "400";
+  lg.appendChild(tail);
+  box.appendChild(lg);
+  return box;
+}
+
+function drawDayStrip(){
+  var svg = document.getElementById("daystrip");
+  var W = 640, H = 40, mid = (H-10)/2;
+  if(!rows.length){ svg.innerHTML = ""; document.getElementById("strip-note").textContent = "0 decisions"; return; }
+  var hrs = rows.map(function(r){ var p = r.t.split(":"); return +p[0] + (+p[1])/60; });
+  var H0 = Math.floor(Math.min.apply(null, hrs.concat([9])));
+  var H1 = Math.ceil(Math.max.apply(null, hrs.concat([16.5])));
+  var X = function(h){ return ((h-H0)/(H1-H0))*W; };
+  var out = '<line x1="0" y1="'+mid+'" x2="'+W+'" y2="'+mid+'" stroke="var(--line-soft)" stroke-width="1"></line>';
+  for(var h=H0; h<=H1; h++){
+    var x = X(h);
+    out += '<line x1="'+x.toFixed(1)+'" y1="6" x2="'+x.toFixed(1)+'" y2="'+(H-10)+'" stroke="var(--line-soft)" stroke-width="1"></line>';
+    out += '<text x="'+(x+3).toFixed(1)+'" y="'+(H-1)+'" font-size="8" fill="var(--muted)" font-family="IBM Plex Mono, monospace">'+h+'</text>';
+  }
+  rows.forEach(function(r){
+    var p = r.t.split(":"), hh = +p[0] + (+p[1])/60;
+    var x = Math.max(2, Math.min(W-2, X(hh)));
+    var col = r.end==="fill" ? "var(--up)" : (r.end==="bad" ? "var(--down)" : "var(--hold)");
+    var half = r.end==="fill" ? 11 : 7;
+    out += '<line x1="'+x.toFixed(1)+'" y1="'+(mid-half)+'" x2="'+x.toFixed(1)+'" y2="'+(mid+half)+'" stroke="'+col+'" stroke-width="2.5" stroke-linecap="round"><title>'+r.t+' '+r.tick+'</title></line>';
+  });
+  svg.innerHTML = out;
+  document.getElementById("strip-note").textContent = rows.length + " decisions";
+}
+
+/* ---------------- funnel (from /api/funnel - the same rows a direct SQL
+   count would see, per acceptance criterion 5) ---------------- */
+function drawFunnel(){
+  if(!funnelData) return;
+  var data = funnelData.stages;
+  var s = document.getElementById("stages"); s.innerHTML = "";
+  data.forEach(function(d, i){
+    var w = el("div","stage");
+    w.appendChild(el("span","stage-n mono", String(d.n)));
+    w.appendChild(el("span","stage-l", d.label));
+    s.appendChild(w);
+    if(i < data.length-1) s.appendChild(el("div","arrow"));
+  });
+
+  var n = data[0].n, filled = data[4].n, sent = data[3].n, cleared = data[1].n;
+  var t = document.getElementById("track"); t.innerHTML = "";
+  function seg(count, color){
+    var i = el("i"); i.style.flex = String(Math.max(count,0)); i.style.background = color; t.appendChild(i);
+  }
+  seg(filled, "var(--up)");
+  seg(Math.max(sent-filled,0), "var(--down)");
+  seg(Math.max(cleared-sent,0), "var(--hold)");
+  seg(Math.max(n-cleared,0), "var(--line)");
+
+  var d = document.getElementById("drops"); d.innerHTML = "";
+  function drop(count, label, mild){
+    if(!count) return;
+    var c = el("div", mild ? "drop mild" : "drop");
+    c.appendChild(el("b", null, "−" + count));
+    c.appendChild(el("span", null, label));
+    d.appendChild(c);
+  }
+  funnelData.drops.forEach(function(dr){ drop(dr.count, dr.label, dr.mild); });
+  if(!d.children.length) d.appendChild(el("div","drop","Every signal reached the broker."));
+  drawDayStrip();
+}
+
+/* ---------------- ledger ---------------- */
+function visible(){
+  if(filter==="sent")    return rows.filter(passed);
+  if(filter==="stopped") return rows.filter(function(r){ return !passed(r); });
+  return rows;
+}
+
+function drawLedger(){
+  var host = document.getElementById("ledger");
+  host.innerHTML = "";
+  var list = visible();
+  document.getElementById("lcount").textContent = list.length + " of " + rows.length;
+
+  list.forEach(function(r){
+    var i = rows.indexOf(r);
+    var b = el("button", "row");
+    b.setAttribute("role","option");
+    b.setAttribute("aria-selected", i===sel ? "true" : "false");
+    b.onclick = function(){ sel = i; selectedId = r.id; drawLedger(); drawDetail(); };
+
+    b.appendChild(el("span","r-time mono", r.t));
+
+    var ch = el("div","chain");
+    var got = reached(r);
+    for(var k=1;k<=4;k++){
+      var dotc = "";
+      if(k < got) dotc = "on";
+      else if(k === got) dotc = r.end==="fill" ? "end" : (r.end==="bad" ? "bad" : "halt");
+      ch.appendChild(el("i", dotc));
+    }
+    b.appendChild(ch);
+
+    var body = el("div","r-body");
+    var head = el("div");
+    head.appendChild(el("span","r-tick", r.tick));
+    head.appendChild(el("span","r-verb v-" + r.verb, r.verb));
+    body.appendChild(head);
+    var note = r.end==="fill"
+      ? "Filled " + r.fill.qty + " at " + r.fill.px + " on " + r.fill.venue
+      : (r.why || "");
+    body.appendChild(el("div","r-note", note));
+    b.appendChild(body);
+
+    b.appendChild(el("span","r-lat mono", r.lat));
+    host.appendChild(b);
+  });
+}
+
+/* ---------------- detail ---------------- */
+function kv(pairs){
+  var d = el("dl","kv");
+  pairs.forEach(function(p){
+    d.appendChild(el("dt", null, p[0]));
+    d.appendChild(el("dd", p[2] || null, p[1]));
+  });
+  return d;
+}
+
+async function drawDetail(){
+  var host = document.getElementById("detail");
+  if(sel < 0 || !rows[sel]){ host.innerHTML = ""; return; }
+  var r = rows[sel];
+
+  var full = detailCache[r.id];
+  if(!full && r.sig){
+    try {
+      full = await getJSON("/api/decisions/" + r.id);
+      detailCache[r.id] = full;
+    } catch(e){ full = null; }
+  }
+  if(r.id !== selectedId) return; // selection moved while the fetch was in flight
+
+  host.innerHTML = "";
+  var top = el("div","d-top");
+  var line = el("div");
+  line.appendChild(el("span","d-tick", r.tick));
+  line.appendChild(el("span","r-verb v-" + r.verb, r.verb));
+  top.appendChild(line);
+  top.appendChild(el("div","d-meta", r.t + "  ·  " + r.lat + " end to end  ·  kronos-1h"));
+  host.appendChild(top);
+
+  var spine = el("div","spine");
+  var got = reached(r);
+
+  STEPS.forEach(function(st, idx){
+    var n = idx + 1;
+    var cls = "step ";
+    if(n < got) cls += "ok";
+    else if(n === got) cls += (r.end==="fill" ? "fin" : (r.end==="bad" ? "bad" : "halt"));
+    else cls += "off";
+
+    var s = el("div", cls);
+    var node = el("div","node", n <= got ? (n===got && r.end==="fill" ? "✓" : (n===got && r.end==="bad" ? "✕" : st.n)) : st.n);
+    s.appendChild(node);
+
+    var col = el("div");
+    col.appendChild(el("h3", null, st.h));
+
+    if(st.k==="sig" && r.sig){
+      col.appendChild(forecastChart(r.sig, full ? full.forecast : null));
+      col.appendChild(confBar(r.sig.h));
+      col.appendChild(kv([
+        ["Predicted move", r.sig.dir, r.sig.dir.charAt(0)==="+" ? "pos" : "neg"],
+        ["Horizon", r.sig.hz],
+        ["Context bars", String(r.sig.ctx)]
+      ]));
+    }
+    if(st.k==="size" && r.size){
+      col.appendChild(kv([
+        ["Target weight", r.size.w],
+        ["Quantity", String(r.size.qty)],
+        ["Reference price", r.size.px],
+        ["Risk", r.size.cap]
+      ]));
+    }
+    if(st.k==="hook" && r.hook){
+      col.appendChild(kv([["Response", (r.hook.code != null ? r.hook.code : "—") + (r.hook.ok ? " accepted" : " rejected")]]));
+      col.appendChild(budgetBar(r));
+      var p = el("pre","payload", JSON.stringify(r.hook.body, null, 2));
+      col.appendChild(p);
+    }
+    if(st.k==="fill" && r.fill){
+      col.appendChild(kv([
+        ["Quantity", String(r.fill.qty)],
+        ["Price", r.fill.px],
+        ["Venue", r.fill.venue]
+      ]));
+    }
+    if(n === got && r.why){
+      col.appendChild(el("div","reason " + (r.end==="bad" ? "bad" : "halt"), r.why));
+    }
+    if(n > got){
+      col.appendChild(el("div","reason", "Not reached."));
+    }
+
+    s.appendChild(col);
+    spine.appendChild(s);
+  });
+
+  host.appendChild(spine);
+}
+
+/* ---------------- exposure ---------------- */
+function drawExposure(){
+  var positions = positionsData.positions || [];
+  var equity = positionsData.equity_usd || 0;
+  var capFrac = positionsData.max_gross_exposure || 0.6;
+  var grossFrac = positionsData.gross_exposure || 0;
+
+  var CAP = capFrac * 100, gross = grossFrac * 100;
+  var frac = capFrac ? Math.min(1, grossFrac / capFrac) : 0;
+  var R = 33, C = 2*Math.PI*R;
+  document.getElementById("expring").innerHTML =
+    '<circle cx="42" cy="42" r="'+R+'" fill="none" stroke="var(--line-soft)" stroke-width="9"></circle>' +
+    '<circle cx="42" cy="42" r="'+R+'" fill="none" stroke="var(--accent)" stroke-width="9" stroke-linecap="round" ' +
+    'stroke-dasharray="'+(C*frac).toFixed(1)+' '+C.toFixed(1)+'" transform="rotate(-90 42 42)"></circle>';
+  document.getElementById("exp-n").textContent = gross.toFixed(1) + "%";
+  document.getElementById("exp-r").textContent = (CAP-gross).toFixed(1) + " points";
+  document.getElementById("exp-cap-label").textContent = "cap " + CAP.toFixed(0) + "%";
+
+  var host = document.getElementById("wbars"); host.innerHTML = "";
+  positions.slice().sort(function(a,b){ return (b.qty*b.entry_price) - (a.qty*a.entry_price); }).forEach(function(x){
+    var w = equity ? (x.qty * x.entry_price / equity * 100) : 0;
+    var row = el("div","wbar");
+    row.appendChild(el("span","wbar-s", x.symbol));
+    var t = el("div","wbar-t"), f = el("div","wbar-f");
+    f.style.width = Math.min(100, (w/20*100)).toFixed(1) + "%";
+    t.appendChild(f); row.appendChild(t);
+    row.appendChild(el("span","wbar-v", w.toFixed(1) + "%"));
+    host.appendChild(row);
+  });
+}
+
+/* ---------------- positions table ---------------- */
+function drawPositions(){
+  var positions = positionsData.positions || [];
+  var b = document.getElementById("positions"); b.innerHTML = "";
+  positions.forEach(function(p){
+    var tr = el("tr");
+    tr.appendChild(el("td","sym", p.symbol));
+    tr.appendChild(el("td","num r", String(p.qty)));
+    tr.appendChild(el("td","num r", Number(p.entry_price).toFixed(2)));
+    tr.appendChild(el("td","num r", "—")); // no live mark price feed in milestone 1
+    tr.appendChild(el("td","num r", "—"));
+    b.appendChild(tr);
+  });
+  document.getElementById("pcount").textContent = positions.length + " open";
+}
+
+/* ---------------- scorecard: forecast vs outcome ---------------- */
+function drawOverlay(){
+  document.getElementById("ov-chips").innerHTML = "";
+  if(!scorecard.length){
+    document.getElementById("ov-count").textContent = "0 closed";
+    document.getElementById("overlay").innerHTML =
+      '<text x="12" y="75" font-size="12" fill="var(--muted)" font-family="Archivo, sans-serif">No closed decisions with a recorded outcome yet.</text>';
+    document.getElementById("ov-stats").innerHTML = "";
+    return;
+  }
+  if(ovSel >= scorecard.length) ovSel = 0;
+  var c = scorecard[ovSel];
+  var ref = c.ref_price;
+  var predPath, realPath, band;
+  try {
+    predPath = JSON.parse(c.forecast_path).map(function(v){ return (v-ref)/ref*100; });
+    realPath = JSON.parse(c.realized_path).map(function(v){ return (v-ref)/ref*100; });
+    band = JSON.parse(c.forecast_band).map(function(b){ return [(b[0]-ref)/ref*100, (b[1]-ref)/ref*100]; });
+  } catch(e){
+    document.getElementById("overlay").innerHTML =
+      '<text x="12" y="75" font-size="12" fill="var(--muted)" font-family="Archivo, sans-serif">Malformed forecast/outcome data for this decision.</text>';
+    return;
+  }
+  var n = Math.max(predPath.length, realPath.length, 1); // exits can land before or after the forecast horizon
+
+  var W = 340, H = 150, L = 34, R = 8, T = 10, B = 22;
+  var vals = predPath.concat(realPath).concat(band.reduce(function(a,b){ return a.concat(b); }, [])).concat([0]);
+  var lo = Math.min.apply(null, vals) * 1.15, hi = Math.max.apply(null, vals) * 1.15;
+  if(hi - lo < 1){ hi += 0.5; lo -= 0.5; }
+  var X = function(i){ return L + ((i+1)/n) * (W-L-R); };
+  var Y = function(v){ return T + (1 - (v-lo)/(hi-lo)) * (H-T-B); };
+
+  var up = [], dn = [];
+  band.forEach(function(b, i){
+    up.push(X(i).toFixed(1)+" "+Y(b[1]).toFixed(1));
+    dn.unshift(X(i).toFixed(1)+" "+Y(b[0]).toFixed(1));
+  });
+  var o = "";
+  o += '<path d="M '+L+' '+Y(0).toFixed(1)+' L '+up.join(" L ")+' L '+dn.join(" L ")+' Z" fill="var(--accent)" opacity=".16"></path>';
+  o += '<line x1="'+L+'" y1="'+Y(0).toFixed(1)+'" x2="'+(W-R)+'" y2="'+Y(0).toFixed(1)+'" stroke="var(--line)" stroke-width="1"></line>';
+  [hi, 0, lo].forEach(function(v){
+    o += '<text x="'+(L-6)+'" y="'+(Y(v)+3).toFixed(1)+'" font-size="8.5" text-anchor="end" fill="var(--muted)" font-family="IBM Plex Mono, monospace">'+(v>0?"+":"")+v.toFixed(1)+'%</text>';
+  });
+  function line(arr, stroke, dash, w){
+    var d = "M "+L+" "+Y(0).toFixed(1)+" " + arr.map(function(v,i){ return "L "+X(i).toFixed(1)+" "+Y(v).toFixed(1); }).join(" ");
+    return '<path d="'+d+'" fill="none" stroke="'+stroke+'" stroke-width="'+w+'" stroke-linecap="round" stroke-linejoin="round"'+(dash?' stroke-dasharray="4 3"':'')+'></path>';
+  }
+  o += line(predPath, "var(--accent)", true, 1.8);
+  o += line(realPath, "var(--ink)", false, 2);
+  var lastIdx = realPath.length - 1;
+  o += '<circle cx="'+X(lastIdx).toFixed(1)+'" cy="'+Y(realPath[lastIdx]).toFixed(1)+'" r="3" fill="var(--ink)"></circle>';
+  o += '<text x="'+L+'" y="'+(H-6)+'" font-size="8.5" fill="var(--muted)" font-family="IBM Plex Mono, monospace">entry</text>';
+  o += '<text x="'+(W-R)+'" y="'+(H-6)+'" font-size="8.5" text-anchor="end" fill="var(--muted)" font-family="IBM Plex Mono, monospace">+'+lastIdx+' bars</text>';
+  document.getElementById("overlay").innerHTML = o;
+
+  var chips = document.getElementById("ov-chips");
+  scorecard.slice(0, 10).forEach(function(x, i){
+    var b = el("button","tchip");
+    b.setAttribute("aria-pressed", i===ovSel ? "true" : "false");
+    var hit = (x.predicted_pct > 0) === (x.realized_pct > 0);
+    var u = el("u"); u.style.background = hit ? "var(--up)" : "var(--down)";
+    b.appendChild(u); b.appendChild(document.createTextNode(x.symbol));
+    b.onclick = function(){ ovSel = i; drawOverlay(); };
+    chips.appendChild(b);
+  });
+
+  var hit = (c.predicted_pct>0) === (c.realized_pct>0);
+  var lastBand = band[band.length-1];
+  var inside = lastBand ? (realPath[realPath.length-1] >= lastBand[0] && realPath[realPath.length-1] <= lastBand[1]) : false;
+  var st = document.getElementById("ov-stats"); st.innerHTML = "";
+  [
+    ["Forecast said", (c.predicted_pct>0?"+":"")+c.predicted_pct.toFixed(2)+"%", ""],
+    ["Actually did", (c.realized_pct>0?"+":"")+c.realized_pct.toFixed(2)+"%", c.realized_pct>0?"pos":"neg"],
+    ["Direction", hit ? "right" : "wrong", hit?"pos":"neg"],
+    ["Inside the cone", inside ? "yes" : "no", inside?"pos":"neg"]
+  ].forEach(function(s){
+    var w = el("div","stat " + s[2]);
+    w.appendChild(el("b", null, s[1]));
+    w.appendChild(el("span", null, s[0]));
+    st.appendChild(w);
+  });
+  document.getElementById("ov-count").textContent = c.symbol + " · " + fmtTime(c.closed_at);
+}
+
+/* ---------------- scorecard: confidence vs result ---------------- */
+function drawScatter(){
+  var W = 340, H = 186, L = 36, R = 10, T = 12, B = 26;
+  var xlo = 0.50, xhi = 0.92, ylo = -5, yhi = 5;
+  var X = function(v){ return L + ((v-xlo)/(xhi-xlo))*(W-L-R); };
+  var Y = function(v){ return T + (1-(v-ylo)/(yhi-ylo))*(H-T-B); };
+
+  if(!scorecard.length){
+    document.getElementById("sc-count").textContent = "0 closed";
+    document.getElementById("scatter").innerHTML =
+      '<text x="12" y="90" font-size="12" fill="var(--muted)" font-family="Archivo, sans-serif">No closed decisions with a recorded outcome yet.</text>';
+    document.getElementById("sc-verdict").textContent =
+      "The 0.55 confidence floor is a placeholder per SPEC.md until enough closed trades exist to test it.";
+    return;
+  }
+
+  var o = "";
+  [-4,-2,0,2,4].forEach(function(v){
+    o += '<line x1="'+L+'" y1="'+Y(v).toFixed(1)+'" x2="'+(W-R)+'" y2="'+Y(v).toFixed(1)+'" stroke="'+(v===0?"var(--line)":"var(--line-soft)")+'" stroke-width="1"></line>';
+    o += '<text x="'+(L-6)+'" y="'+(Y(v)+3).toFixed(1)+'" font-size="8.5" text-anchor="end" fill="var(--muted)" font-family="IBM Plex Mono, monospace">'+(v>0?"+":"")+v+'%</text>';
+  });
+
+  if(scorecard.length >= 4){
+    var bands = [[0.55,0.63],[0.63,0.71],[0.71,0.79],[0.79,0.92]];
+    bands.forEach(function(b){
+      var inb = scorecard.filter(function(c){ return c.confidence>=b[0] && c.confidence<b[1]; });
+      if(!inb.length) return;
+      var m = inb.reduce(function(a,c){ return a+c.realized_pct; },0)/inb.length;
+      var x0 = X(b[0]), x1 = X(b[1]);
+      o += '<line x1="'+(x0+3).toFixed(1)+'" y1="'+Y(m).toFixed(1)+'" x2="'+(x1-3).toFixed(1)+'" y2="'+Y(m).toFixed(1)+'" stroke="var(--ink-2)" stroke-width="2.5" stroke-linecap="round"><title>band mean '+m.toFixed(2)+'% over '+inb.length+' trades</title></line>';
+    });
+  }
+
+  o += '<line x1="'+X(0.55).toFixed(1)+'" y1="'+T+'" x2="'+X(0.55).toFixed(1)+'" y2="'+(H-B)+'" stroke="var(--ink)" stroke-width="1.5" stroke-dasharray="3 3"></line>';
+  o += '<text x="'+(X(0.55)+5).toFixed(1)+'" y="'+(T+9)+'" font-size="8.5" fill="var(--ink-2)" font-family="IBM Plex Mono, monospace">0.55 floor</text>';
+
+  scorecard.forEach(function(c){
+    o += '<circle cx="'+X(c.confidence).toFixed(1)+'" cy="'+Y(c.realized_pct).toFixed(1)+'" r="3.8" fill="'+(c.realized_pct>0?"var(--up)":"var(--down)")+'" opacity=".85"><title>'+c.symbol+'  conf '+c.confidence.toFixed(2)+'  result '+c.realized_pct.toFixed(2)+'%</title></circle>';
+  });
+
+  [0.55,0.65,0.75,0.85].forEach(function(v){
+    o += '<text x="'+X(v).toFixed(1)+'" y="'+(H-8)+'" font-size="8.5" text-anchor="middle" fill="var(--muted)" font-family="IBM Plex Mono, monospace">'+v.toFixed(2)+'</text>';
+  });
+  document.getElementById("scatter").innerHTML = o;
+
+  var n = scorecard.length;
+  var wins = scorecard.filter(function(c){ return c.realized_pct>0; }).length;
+  document.getElementById("sc-count").textContent = n + " closed";
+
+  if(n < 5){
+    document.getElementById("sc-verdict").textContent =
+      "n = " + n + ", " + wins + " closed up. Too few closed trades to say anything about confidence vs. outcome yet - " +
+      "the 0.55 floor stays an unproven placeholder per SPEC.md until n is large enough to test it.";
+    return;
+  }
+
+  var mx = scorecard.reduce(function(a,c){ return a+c.confidence; },0)/n;
+  var my = scorecard.reduce(function(a,c){ return a+c.realized_pct; },0)/n;
+  var num=0, dx=0, dy=0;
+  scorecard.forEach(function(c){ num += (c.confidence-mx)*(c.realized_pct-my); dx += Math.pow(c.confidence-mx,2); dy += Math.pow(c.realized_pct-my,2); });
+  var r = (dx && dy) ? num / Math.sqrt(dx*dy) : 0;
+
+  document.getElementById("sc-verdict").textContent =
+    "n = " + n + ", " + wins + " closed up. Correlation between confidence and realized move is r = " + r.toFixed(2) +
+    ". At this sample size that is indistinguishable from noise, so the 0.55 floor is an assumption, not a measured rule. Revisit at n = 100.";
+}
+
+/* ---------------- refresh cycle ---------------- */
+async function refreshAll(){
+  try {
+    await Promise.all([loadDecisions(), loadFunnel(), loadPositions(), loadScorecard()]);
+    updateNotice();
+    drawFunnel(); drawLedger(); await drawDetail(); drawPositions(); drawExposure();
+    drawOverlay(); drawScatter();
+  } catch(e){
+    var notice = document.getElementById("notice");
+    notice.style.display = "";
+    document.getElementById("notice-detail").textContent =
+      "Could not reach the local API (" + e.message + "). Is \"python -m src.server.app\" running?";
+  }
+}
+
+setInterval(function(){ if(live) refreshAll(); }, 8000);
+
+/* ---------------- controls ---------------- */
+document.getElementById("filters").addEventListener("click", function(e){
+  var b = e.target.closest(".chip"); if(!b) return;
+  filter = b.dataset.f;
+  [].forEach.call(this.querySelectorAll(".chip"), function(c){
+    c.setAttribute("aria-pressed", c===b ? "true" : "false");
+  });
+  drawLedger();
+});
+
+document.getElementById("feed").onclick = function(){
+  live = !live;
+  this.textContent = live ? "Pause feed" : "Resume feed";
+  this.setAttribute("aria-pressed", live ? "true" : "false");
+  if(live) refreshAll();
+};
+
+var themeBtn = document.getElementById("theme");
+function isDark(){
+  var set = document.documentElement.getAttribute("data-theme");
+  if(set) return set === "dark";
+  return window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+function syncThemeBtn(){ themeBtn.textContent = isDark() ? "Light" : "Dark"; }
+themeBtn.onclick = function(){
+  document.documentElement.setAttribute("data-theme", isDark() ? "light" : "dark");
+  syncThemeBtn();
+};
+syncThemeBtn();
+
+document.getElementById("ledger").addEventListener("keydown", function(e){
+  if(e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  e.preventDefault();
+  var list = visible();
+  var i = list.indexOf(rows[sel]);
+  i = Math.min(list.length-1, Math.max(0, i + (e.key==="ArrowDown" ? 1 : -1)));
+  sel = rows.indexOf(list[i]);
+  selectedId = rows[sel] ? rows[sel].id : null;
+  drawLedger(); drawDetail();
+});
+
+function tick(){
+  var d = new Date();
+  document.getElementById("clock").textContent =
+    String(d.getUTCHours()).padStart(2,"0")+":"+String(d.getUTCMinutes()).padStart(2,"0")+":"+String(d.getUTCSeconds()).padStart(2,"0")+" UTC";
+}
+setInterval(tick, 1000); tick();
+
+refreshAll();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+# Milestone 1 sizing: fixed fractional. skfolio replaces this file's role
+# at milestone 4 - the risk layer's function signature does not change.
+
+starting_equity_usd: 10000.0
+daily_loss_limit_usd: 200.0   # kill switch, checked before every submission
+
+position_fraction: 0.05       # fixed 5% of equity per position, milestone 1 only
+min_ticket_usd: 50.0          # a computed position below this is refused, not sized down
+max_gross_exposure: 0.60      # sum of abs(position notional) / equity, checked across the whole candidate set
+
+# Placeholder per SPEC.md open decision #5: unproven until the scorecard has
+# enough closed trades to test it. The terminal must say so on screen.
+confidence_floor: 0.55
+
+horizon_bars: 4               # how many bars ahead the signal predicts
+exit_after_bars: 4            # milestone 1 exit rule (open decision #7): time-based, exit after N bars
+
+# Kill switches (see SPEC.md "Operating rules")
+consecutive_webhook_failures_halt: 3
+stale_data_max_intervals: 2
