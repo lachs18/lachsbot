@@ -120,6 +120,19 @@ def record_execution(
     conn.commit()
 
 
+def record_logged(conn: sqlite3.Connection, decision_id: str, limit_price: float | None, stage_ms: dict, latency_ms: int) -> None:
+    """Log-only mode's execution stage: records what the order *would* have
+    looked like (limit_price) but never calls the webhook, never touches
+    the network. stopped_at is left at 2 (set by record_allocation) -
+    stage 3 never ran, so claiming it did would violate the same "no row
+    claims a stage it never reached" rule that governs a mid-run crash."""
+    conn.execute(
+        """UPDATE decisions SET limit_price=?, stage_ms=?, latency_ms=?, outcome='logged' WHERE id=?""",
+        (limit_price, json.dumps(stage_ms), latency_ms, decision_id),
+    )
+    conn.commit()
+
+
 def record_fill(conn: sqlite3.Connection, decision_id: str, fill_qty: float, fill_price: float, fill_at: str, venue: str) -> None:
     """Stage 4. TradersPost has no live order/fill API today (see cli.py
     reconcile), so this is backfilled from an order-history export rather

@@ -31,7 +31,10 @@ from src.types import PortfolioState, Refusal
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")  # no-op if the file doesn't exist - never overrides an already-exported var
 
-MODE = "paper"
+# 'log' never calls webhook.submit - see run_once(). 'paper' is the milestone
+# 1 flow against a TradersPost paper strategy. Deliberately no 'live': that
+# is milestone 5, gated on the entry conditions in SPEC.md, not a flag flip.
+VALID_MODES = ("log", "paper")
 
 logger = logging.getLogger("kronos1h")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -60,9 +63,18 @@ def _load_portfolio_state(conn, equity_usd: float, timeframe_minutes: int, curre
     return PortfolioState(equity_usd=equity_usd, positions=pos_qty, bars_held=bars_held, gross_exposure=gross_exposure)
 
 
-def run_once(bar_close: str | None = None) -> int:
+def run_once(bar_close: str | None = None, mode: str = "log") -> int:
     """One full cycle: fetch, validate, forecast, size, execute, log.
-    Returns 0 on success, 1 if the HALT file blocked the run entirely."""
+    Returns 0 on success, 1 if the HALT file blocked the run entirely.
+
+    mode='log' (the default) runs data through signal, risk and the log -
+    webhook.submit() is never called and no TradersPost/broker credentials
+    are needed. mode='paper' additionally posts to the configured TradersPost
+    paper strategy; it is never the default and must be passed explicitly,
+    on the CLI via --mode paper, so a stray call can't post live-shaped
+    orders just because .env now happens to be populated."""
+    if mode not in VALID_MODES:
+        raise ValueError(f"mode must be one of {VALID_MODES}, got {mode!r}")
     if halt_file_present():
         logger.error("HALT file present at repo root - refusing to run. Remove it to resume.")
         return 1
@@ -93,7 +105,7 @@ def run_once(bar_close: str | None = None) -> int:
             bc = bar_close or datetime.now(UTC).isoformat()
             stage_ms = {"data": int(t_data * 1000), "inference": 0, "risk": 0, "network": 0}
             writer.create_data_halt(
-                conn, symbol, bc, strategy, MODE, f"data layer: {exc}", stage_ms,
+                conn, symbol, bc, strategy, mode, f"data layer: {exc}", stage_ms,
                 latency_ms=int((time.perf_counter() - t0) * 1000),
             )
             logger.warning("data halt for %s: %s", symbol, exc)
@@ -103,7 +115,7 @@ def run_once(bar_close: str | None = None) -> int:
         sig = sma.forecast(bars, symbol, horizon_bars=horizon_bars)
         t_inference = time.perf_counter() - t1
 
-        decision_id = writer.create_decision(conn, sig, strategy, MODE)
+        decision_id = writer.create_decision(conn, sig, strategy, mode)
         entries[symbol] = {"decision_id": decision_id, "t_data": t_data, "t_inference": t_inference, "t0": t0}
         signals.append(sig)
 
@@ -141,6 +153,13 @@ def run_once(bar_close: str | None = None) -> int:
 
         writer.record_allocation(conn, decision_id, result)
 
+        tolerance_bps = tol_by_symbol.get(result.symbol, 0.0)
+
+        if mode == "log":
+            limit_price = webhook.compute_limit_price(result, tolerance_bps)
+            writer.record_logged(conn, decision_id, limit_price, stage_ms, latency_ms)
+            continue
+
         if halt_file_present():
             writer.record_refusal(
                 conn, decision_id,
@@ -157,7 +176,6 @@ def run_once(bar_close: str | None = None) -> int:
             )
             continue
 
-        tolerance_bps = tol_by_symbol.get(result.symbol, 0.0)
         traderspost_ticker = ticker_by_symbol[result.symbol]
         t_net0 = time.perf_counter()
         wh = webhook.submit(
@@ -181,7 +199,7 @@ def run_once(bar_close: str | None = None) -> int:
     return 0
 
 
-def run_scheduled(poll_interval_s: int = 5) -> None:
+def run_scheduled(poll_interval_s: int = 5, mode: str = "log") -> None:
     universe_cfg, _ = load_config()
     cal = calendar_from_config(universe_cfg["calendar"])
     timeframe_minutes = ccxt_provider.TIMEFRAME_MINUTES[universe_cfg["timeframe"]]
@@ -197,7 +215,7 @@ def run_scheduled(poll_interval_s: int = 5) -> None:
         bar_close_iso = next_close.astimezone(UTC).isoformat()
         logger.info("running cycle for bar_close=%s", bar_close_iso)
         try:
-            run_once(bar_close=bar_close_iso)
+            run_once(bar_close=bar_close_iso, mode=mode)
         except Exception:
             logger.exception("run_once crashed for bar_close=%s", bar_close_iso)
 
@@ -373,9 +391,11 @@ def main(argv: list[str] | None = None) -> int:
 
     p_once = sub.add_parser("run-once")
     p_once.add_argument("--bar-close", default=None)
+    p_once.add_argument("--mode", choices=VALID_MODES, default="log")
 
     p_sched = sub.add_parser("run-scheduled")
     p_sched.add_argument("--poll-interval", type=int, default=5)
+    p_sched.add_argument("--mode", choices=VALID_MODES, default="log")
 
     p_replay = sub.add_parser("replay")
     p_replay.add_argument("bar_close")
@@ -386,9 +406,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "run-once":
-        return run_once(bar_close=args.bar_close)
+        return run_once(bar_close=args.bar_close, mode=args.mode)
     if args.command == "run-scheduled":
-        run_scheduled(poll_interval_s=args.poll_interval)
+        run_scheduled(poll_interval_s=args.poll_interval, mode=args.mode)
         return 0
     if args.command == "replay":
         return replay(args.bar_close)
