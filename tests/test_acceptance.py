@@ -12,54 +12,20 @@ from __future__ import annotations
 import json
 import logging
 
-import pandas as pd
 import pytest
 
 import src.log.db as db_module
 from src import cli
-from src.data import ccxt_provider
 from tests.conftest import make_bars
 
-
-def _fresh_bars(n: int = 40, step: float = 1.0) -> pd.DataFrame:
-    """Bars anchored to real 'now' so the staleness kill switch does not
-    fire in these tests - make_bars()'s fixed historical date is meant for
-    tests that never go through validate_bars() (e.g. test_signal.py)."""
-    now = pd.Timestamp.now(tz="UTC").floor("h")
-    idx = pd.date_range(end=now, periods=n, freq="1h")
-    closes = [100.0 + step * i for i in range(n)]
-    return pd.DataFrame(
-        {
-            "open": closes,
-            "high": [c + 0.1 for c in closes],
-            "low": [c - 0.1 for c in closes],
-            "close": closes,
-            "volume": [10.0] * n,
-        },
-        index=idx,
-    )
-
-
-@pytest.fixture(autouse=True)
-def _isolated_db(monkeypatch, tmp_path):
-    real_connect = db_module.connect
-    db_path = tmp_path / "decisions.db"
-    monkeypatch.setattr(db_module, "connect", lambda *a, **kw: real_connect(db_path))
-    monkeypatch.delenv("TRADERSPOST_WEBHOOK_URL_CRYPTO", raising=False)
-    return db_path
-
-
-@pytest.fixture()
-def _synthetic_bars(monkeypatch):
-    def fake_fetch(symbol, timeframe, exchange, limit=512):
-        return _fresh_bars(n=40, step=1.0)
-
-    monkeypatch.setattr(ccxt_provider, "fetch_ohlcv", fake_fetch)
+# Milestone 1's acceptance criteria are all about the paper/webhook flow -
+# every cli.run_once() call below is explicit about that, since the CLI's
+# own default is now mode='log' (milestone 2 phase 1; see test_log_only_mode.py).
 
 
 def test_run_once_writes_one_row_per_symbol_including_non_traders(_synthetic_bars, _isolated_db):
     """Acceptance criterion 1."""
-    cli.run_once()
+    cli.run_once(mode="paper")
     conn = db_module.connect(_isolated_db)
     universe, _ = cli.load_config()
     symbols = [s["symbol"] for s in universe["symbols"]]
@@ -71,7 +37,7 @@ def test_run_once_writes_one_row_per_symbol_including_non_traders(_synthetic_bar
 def test_run_once_every_non_filled_row_has_a_reason(_synthetic_bars, _isolated_db):
     """Acceptance criterion 2. With no webhook URL configured, every row
     should end up 'failed' with a reason - none should be silently blank."""
-    cli.run_once()
+    cli.run_once(mode="paper")
     conn = db_module.connect(_isolated_db)
     bad = conn.execute(
         "SELECT * FROM decisions WHERE outcome != 'filled' AND (reason IS NULL OR reason = '')"
@@ -102,7 +68,7 @@ def test_webhook_rejection_logs_at_error_level(_synthetic_bars, _isolated_db, mo
     )
 
     with caplog.at_level(logging.ERROR, logger="kronos1h"):
-        cli.run_once()
+        cli.run_once(mode="paper")
 
     error_messages = [r.getMessage() for r in caplog.records if r.levelname == "ERROR"]
     assert any("webhook rejected" in m for m in error_messages)
@@ -110,7 +76,7 @@ def test_webhook_rejection_logs_at_error_level(_synthetic_bars, _isolated_db, mo
 
 def test_run_once_populates_latency_and_stage_ms_on_every_row(_synthetic_bars, _isolated_db):
     """Acceptance criterion 6."""
-    cli.run_once()
+    cli.run_once(mode="paper")
     conn = db_module.connect(_isolated_db)
     rows = conn.execute("SELECT * FROM decisions").fetchall()
     assert len(rows) > 0
@@ -136,7 +102,7 @@ def test_crash_mid_run_leaves_stopped_at_matching_last_completed_stage(monkeypat
     monkeypatch.setattr(cli.sma, "forecast", flaky_forecast)
 
     with pytest.raises(RuntimeError):
-        cli.run_once()
+        cli.run_once(mode="paper")
 
     conn = db_module.connect(_isolated_db)
     rows = conn.execute("SELECT * FROM decisions").fetchall()

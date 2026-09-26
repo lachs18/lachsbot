@@ -29,7 +29,15 @@ uv pip install -e ".[dev]"
 python -m pytest tests/ -q
 ```
 
-You should see something like `47 passed`. If this doesn't pass, stop here - nothing past this point will work either.
+Every test should pass (`N passed`, no failures). If this doesn't pass, stop here - nothing past this point will work either.
+
+**You can stop here for now and come back later.** Everything below this point (Steps 2-7) is only needed once you're ready to send real webhooks to a TradersPost paper strategy. Until then:
+
+```bash
+python -m src.cli run-once
+```
+
+This runs data → signal → risk → log against live public Coinbase market data (no account, no key, nothing in `.env` needed) and writes a real row per symbol with `outcome='logged'` - it never calls TradersPost. This is `--mode log`, the default; see SPEC.md's "Log-only bring-up" for what it does and does not prove. `python -m src.server.app` (Step 7 below) works against these rows too, so you can watch the terminal fill up before touching Steps 2-6 at all.
 
 ## Step 2: Create a Coinbase account (if you don't have one)
 
@@ -127,10 +135,12 @@ Once Steps 1-6 are done, in order:
 
 ```bash
 # 1. Run one full cycle against the live Coinbase data feed and your
-#    paper TradersPost strategy. Needs real network access to Coinbase
-#    and TradersPost - this will not work from a sandboxed environment
-#    with outbound network restrictions.
-python -m src.cli run-once
+#    paper TradersPost strategy. --mode paper is required here - without
+#    it this only logs (see Step 1 above) and never calls the webhook.
+#    Needs real network access to Coinbase and TradersPost - this will
+#    not work from a sandboxed environment with outbound network
+#    restrictions.
+python -m src.cli run-once --mode paper
 
 # 2. Start the terminal's local API server
 python -m src.server.app

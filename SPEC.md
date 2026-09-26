@@ -75,7 +75,7 @@ CREATE TABLE decisions (
   created_at    TEXT NOT NULL,        -- ISO 8601 UTC, when stage 3 finished
   symbol        TEXT NOT NULL,
   strategy      TEXT NOT NULL,        -- 'kronos-1h'
-  mode          TEXT NOT NULL,        -- 'paper' | 'live'
+  mode          TEXT NOT NULL,        -- 'log' | 'paper' | 'live'
 
   -- stage 1: signal
   direction     TEXT,                 -- 'long' | 'short' | 'flat'
@@ -105,7 +105,7 @@ CREATE TABLE decisions (
 
   -- outcome
   stopped_at    INTEGER NOT NULL,     -- 1..4, the last stage reached
-  outcome       TEXT NOT NULL,        -- 'filled' | 'halted' | 'failed' | 'pending'
+  outcome       TEXT NOT NULL,        -- 'filled' | 'halted' | 'failed' | 'pending' | 'logged'
   reason        TEXT,                 -- required whenever outcome != 'filled'
   latency_ms    INTEGER NOT NULL,     -- bar_close to webhook sent
   stage_ms      TEXT                  -- JSON: {"data":n,"inference":n,"risk":n,"network":n}
@@ -319,6 +319,12 @@ Claude Code checks itself against these. All must pass before milestone 2 starts
 ### Done means
 
 You watch a signal travel from bar close to paper fill, and the terminal shows the whole chain with the reason at every step. That is the milestone. Everything after it is swapping components into a frame that already works.
+
+### Log-only bring-up
+
+Not one of the numbered milestones below - a way to exercise data, signal, risk and the log before a TradersPost paper strategy or a broker key exist, so the code isn't sitting idle waiting on account setup. `cli.py run-once` / `run-scheduled` take `--mode log|paper`, default `log`. In `log` mode, `webhook.submit()` is never called and no `.env` entries are read for anything beyond what the data layer already needs (nothing, for public OHLCV) - a row that would have executed is written with `outcome='logged'` and `stopped_at=2` instead: risk sizing ran, execution deliberately did not, so the row does not claim a stage it never reached. `paper` is never the default and must be passed explicitly, on the CLI or in code, so a stray call can't post a live-shaped order just because `.env` now happens to be populated.
+
+This does **not** advance milestone 1's own entry condition for milestone 2 below - milestone 1's "Build" list and acceptance criteria 3, 4, 7 and 8 specifically require the TradersPost paper leg, which log-only mode does not exercise. Running in `log` mode lets you validate the signal/risk/log path early; the paper leg still has to run for real, for five consecutive trading days, before milestone 2 (Kronos) starts.
 
 ## Milestones 2 to 5
 
